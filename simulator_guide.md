@@ -26,6 +26,7 @@ __2) Run ROS Environment__
 ```shell
 $ cd ~/gem_ws/src
 $ source devel/setup.bash
+$ cd ~/gem_ws
 $ roslaunch gem_launch gem_init.launch world_name:="track1.world"  
 ```
 
@@ -33,6 +34,7 @@ $ roslaunch gem_launch gem_init.launch world_name:="track1.world"
 ```shell
 $ cd ~/gem_ws/src
 $ source devel/setup.bash
+$ cd ~/gem_ws
 $ roslaunch gem_launch gem_sensor_info.launch
 ```
 
@@ -40,5 +42,6 @@ $ roslaunch gem_launch gem_sensor_info.launch
 ```shell
 $ cd ~/gem_ws/src
 $ source devel/setup.bash
+$ cd ~/gem_ws
 $ rosrun gem_pure_pursuit_sim pure_pursuit_sim.py
 ```

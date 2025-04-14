@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 
 #================================================================
-# File name: lane_detection.py                                                                  
+# File name: pedestrian_detector.py                                                                  
 # Description: learning-based lane detection module                                                            
 # Author: Siddharth Anand
 # Email: sanand12@illinois.edu                                                                 
@@ -32,10 +32,11 @@ from filters import OnlineFilter
 # ROS Headers
 import rospy
 from nav_msgs.msg import Path
+import message_filters
 
 # GEM Sensor Headers
 from sensor_msgs.msg import Image
-from std_msgs.msg import String, Header, Bool, Float32, Float64
+from std_msgs.msg import String, Header, Bool, Float32, Float64, Float32MultiArray
 
 # GEM PACMod Headers
 from geometry_msgs.msg import PoseStamped
@@ -78,7 +79,7 @@ class PedestrianDetector:
         self.batch = False # Flag to choose batch or not @TODO: Implement batch, do we want that?
         
         # Initialize ROS node
-        rospy.init_node('lane_detection_node', anonymous=True)
+        rospy.init_node('pedestrian_detector_node', anonymous=True)
         
         # Image processing utilities and state variables
         self.bridge = CvBridge()  # Converts between ROS Image messages and OpenCV images
@@ -106,18 +107,23 @@ class PedestrianDetector:
         self.Real_Height_SS = .75  # Height of stop sign in meters (not used currently)
         self.Brake_Distance = 5  # Distance at which to apply brakes (not used currently)
         self.Brake_Duration = 3  # Duration to hold brakes (not used currently)
-        self.Conf_Threshold = 0.8 # Confidence threshold to keep person prediction
+        self.Conf_Threshold = 0.7 # Confidence threshold to keep person prediction
         
         ###############################################################################
         # ROS Communication Setup
         ###############################################################################
         
         # Subscribe to camera feed
-        self.sub_image = rospy.Subscriber('/zed2/zed_node/left/image_rect_color', Image, self.img_callback, queue_size=1)
-        # note that oak/rgb/image_raw is the topic name for the GEM E4. If you run this on the E2, you will need to change the topic name to e.g., /zed2/zed_node/left/image_rect_color
+        # self.sub_image = rospy.Subscriber('/zed2/zed_node/left/image_rect_color', Image, self.img_callback, queue_size=1)
+        self.sub_rgb_img = message_filters.Subscriber('/zed2/zed_node/rgb/image_rect_color', Image)
+        self.sub_depth_img = message_filters.Subscriber('/zed2/zed_node/depth/depth_registered', Image)
+        self.ts = message_filters.ApproximateTimeSynchronizer([self.sub_rgb_img, self.sub_depth_img], queue_size=2, slop=0.1)
+        self.ts.registerCallback(self.img_callback)
         
         # Publishers for visualization and control
-        # self.pub_bounding_box = rospy.Publisher("pedestrian_detection/bounding_box", list, queue_size=1)
+        self.pub_bounding_box = rospy.Publisher("pedestrian_detection/bounding_box", Float32MultiArray, queue_size=1)
+        self.pub_rgb_pedestrian_image = rospy.Publisher("pedestrian_detection/rgb/pedestrian_image", Image, queue_size=1)
+        self.pub_depth = rospy.Publisher("pedestrian_detection/avg_depth", Float32MultiArray, queue_size=1)
 
     def letterbox(self, img, new_shape=(384, 640), color=(114, 114, 114)):
         """
@@ -203,7 +209,7 @@ class PedestrianDetector:
 
         return all_box_coords, all_highest_conf 
     
-    def get_pedestrian_box_single(self, model, frame):
+    def get_pedestrian_box(self, model, frame):
         """
         Gets pose points from a given YOLO model and frame.
         Args:
@@ -235,42 +241,69 @@ class PedestrianDetector:
 
         return box_coords, highest_conf 
     
-    def img_callback(self, img):
-        try:
-            img = self.bridge.imgmsg_to_cv2(img, "bgr8")
+    def process_pedestrian_box(self, box_coords, conf, pad, ratio, rgb_img, depth_img):
 
-            resized_img, ratio, pad = self.letterbox(img)  # unpack ratio and padding
+        avg_depth, med_depth, sd_depth = None, None, None
 
-            if self.batch:
-                self.frame_buffer.append(resized_img)
-                if len(self.frame_buffer) >= self.buffer_size:
-                    with torch.no_grad():
-                        all_box_coords, all_conf = self.get_pedestrian_box_multi(self.pedestrian_model, self.frame_buffer)
-                    self.frame_buffer.clear()
-                    for i in range(self.buffer_size):
-                        conf = all_conf[i]
-                        box_coords = all_box_coords[i]
-                        # if conf > self.Conf_Threshold and box_coords:
-                        #     self.pub_bounding_box.publish(box_coords)
+        if box_coords and conf > self.Conf_Threshold:
+
+            # Draw the bounding box on the image (adjust for padding and ratio)
+            x1, y1, x2, y2 = box_coords
+            # Convert to int and adjust for letterbox padding
+            x1 = int((x1 - pad[0]) / ratio[0])
+            y1 = int((y1 - pad[1]) / ratio[1])
+            x2 = int((x2 - pad[0]) / ratio[0])
+            y2 = int((y2 - pad[1]) / ratio[1])
+
+            # Publish box coordinate data
+            box_coords_msg = Float32MultiArray()
+            box_coords_msg.data = list(box_coords)
+            self.pub_bounding_box.publish(box_coords_msg)
+
+            # Extract region of interest from the depth image
+            depth_roi = depth_img[y1:y2, x1:x2]
+            valid_depths = depth_roi[np.isfinite(depth_roi) & (depth_roi > 0)]
+            if valid_depths.size > 0:
+                # Remove outliers: keep values within 2 standard deviations
+                mean_depth = np.mean(valid_depths)
+                std_depth = np.std(valid_depths)
+                filtered_depths = valid_depths[(valid_depths > (mean_depth - 2 * std_depth)) & (valid_depths < (mean_depth + 2 * std_depth))]
+
+                if filtered_depths.size > 0:
+                    avg_depth = np.mean(filtered_depths)
+                    med_depth = np.median(filtered_depths)
+                    sd_depth = np.std(filtered_depths)
+                else:
+                    avg_depth = med_depth = sd_depth = None
             else:
-                box_coords, conf = self.get_pedestrian_box_single(self.pedestrian_model, resized_img)
+                avg_depth = med_depth = sd_depth = None
 
-                if conf > self.Conf_Threshold and box_coords:
-                    # self.pub_bounding_box.publish(box_coords)
+            # Add rectangle to rgb image
+            cv2.rectangle(rgb_img, (x1, y1), (x2, y2), (0, 255, 0), 2)
+            cv2.putText(rgb_img, f"Pedestrian: {avg_depth:.2f}m", (x1, y1 - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 0, 0), 2)
+        
+        return rgb_img, avg_depth, med_depth, sd_depth
 
-                    # Draw the bounding box on the image (adjust for padding and ratio)
-                    x1, y1, x2, y2 = box_coords
-                    # Convert to int and adjust for letterbox padding
-                    x1 = int((x1 - pad[0]) / ratio[0])
-                    y1 = int((y1 - pad[1]) / ratio[1])
-                    x2 = int((x2 - pad[0]) / ratio[0])
-                    y2 = int((y2 - pad[1]) / ratio[1])
-                    cv2.rectangle(img, (x1, y1), (x2, y2), (0, 255, 0), 2)
-                    cv2.putText(img, f"Person: {conf:.2f}", (x1, y1 - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 0, 0), 2)
+    
+    def img_callback(self, rgb_img, depth_img):
+        try:
+            rgb_img = self.bridge.imgmsg_to_cv2(rgb_img, "bgr8")
+            depth_img = self.bridge.imgmsg_to_cv2(depth_img, "32FC1")
 
-            # Show the image
-            cv2.imshow("Pedestrian Detection", img)
-            cv2.waitKey(1)  # 1 ms wait so it updates the window without blocking
+            resized_img, ratio, pad = self.letterbox(rgb_img)  # unpack ratio and padding
+
+            box_coords, conf = self.get_pedestrian_box(self.pedestrian_model, resized_img) # Get bounding box of detected pedestrian
+
+            rgb_img, avg_depth, med_depth, sd_depth = self.process_pedestrian_box(box_coords, conf, pad, ratio, rgb_img, depth_img)
+
+            # Publish RGB image
+            ros_rgb_img = self.bridge.cv2_to_imgmsg(rgb_img, "bgr8")
+            self.pub_rgb_pedestrian_image.publish(ros_rgb_img)
+
+            # Publish Depth Data:
+            depth_data = Float32MultiArray()
+            depth_data.data = [avg_depth, med_depth, sd_depth]
+            self.pub_depth.publish(depth_data)
 
         except CvBridgeError as e:
             print(e)
@@ -293,3 +326,4 @@ if __name__ == "__main__":
         rate = rospy.spin() #r ospy.Rate(10)  # 10 Hz control loop
     except rospy.ROSInterruptException:
         pass
+

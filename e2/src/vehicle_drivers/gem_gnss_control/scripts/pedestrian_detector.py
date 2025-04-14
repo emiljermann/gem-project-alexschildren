@@ -117,7 +117,7 @@ class PedestrianDetector:
         # note that oak/rgb/image_raw is the topic name for the GEM E4. If you run this on the E2, you will need to change the topic name to e.g., /zed2/zed_node/left/image_rect_color
         
         # Publishers for visualization and control
-        self.pub_bounding_box = rospy.Publisher("pedestrian_detection/bounding_box", list, queue_size=1)
+        # self.pub_bounding_box = rospy.Publisher("pedestrian_detection/bounding_box", list, queue_size=1)
 
     def letterbox(self, img, new_shape=(384, 640), color=(114, 114, 114)):
         """
@@ -216,7 +216,7 @@ class PedestrianDetector:
             confidence: confidence score that said pedestrian exists
         """
         with torch.no_grad():
-            result = model(frame).pandas().xyxy
+            result = model(frame).pandas().xyxy[0]
 
         if len(result) == 0:
             return None, 0
@@ -236,57 +236,41 @@ class PedestrianDetector:
         return box_coords, highest_conf 
     
     def img_callback(self, img):
-        """
-        Process incoming camera images to detect  pedestrians and generate bounding boxes.
-        
-        This function:
-        1. Converts ROS image to OpenCV format
-        2. Enhances image using color filtering and contrast
-        3. Preprocesses image for neural network
-        4. Adds image to buffer for batch processing
-        5. Performs inference when buffer is full
-        6. Generates and publishes waypoints and visualizations
-        
-        Args:
-            img: ROS Image message from camera
-        """
         try:
-            # Convert ROS Image to OpenCV format
             img = self.bridge.imgmsg_to_cv2(img, "bgr8")
-            
-            ###############################################################################
-            # Model Inference Pipeline
-            ###############################################################################
-            
-            resized_img = self.letterbox(img)[0] # ATTENTION: This changes the coordinates of the bounding box, so use of the outputted bounding box must be taken into account
 
-            if self.batch: # @TODO: Currently this makes no sense bc the queue is size 1, but I kept it unless we want it later
-                # Add to buffer for batch processing
+            resized_img, ratio, pad = self.letterbox(img)  # unpack ratio and padding
+
+            if self.batch:
                 self.frame_buffer.append(resized_img)
-                
-                # When buffer is full, process batch for efficiency
                 if len(self.frame_buffer) >= self.buffer_size:
-
-                    # Run inference on batch
                     with torch.no_grad():
                         all_box_coords, all_conf = self.get_pedestrian_box_multi(self.pedestrian_model, self.frame_buffer)
-
                     self.frame_buffer.clear()
-
-                    for i in range(self.buffer_size): 
+                    for i in range(self.buffer_size):
                         conf = all_conf[i]
                         box_coords = all_box_coords[i]
-                        if conf > self.Conf_Threshold:
-                            self.pub_bounding_box.publish(box_coords)
-
+                        # if conf > self.Conf_Threshold and box_coords:
+                        #     self.pub_bounding_box.publish(box_coords)
             else:
-                # Run inference on single image
-                with torch.no_grad():
-                    box_coords, conf = self.get_pedestrian_box_single(self.pedestrian_model, resized_img)
+                box_coords, conf = self.get_pedestrian_box_single(self.pedestrian_model, resized_img)
 
-                if conf > self.Conf_Threshold:
-                    self.pub_bounding_box.publish(box_coords)
+                if conf > self.Conf_Threshold and box_coords:
+                    # self.pub_bounding_box.publish(box_coords)
 
+                    # Draw the bounding box on the image (adjust for padding and ratio)
+                    x1, y1, x2, y2 = box_coords
+                    # Convert to int and adjust for letterbox padding
+                    x1 = int((x1 - pad[0]) / ratio[0])
+                    y1 = int((y1 - pad[1]) / ratio[1])
+                    x2 = int((x2 - pad[0]) / ratio[0])
+                    y2 = int((y2 - pad[1]) / ratio[1])
+                    cv2.rectangle(img, (x1, y1), (x2, y2), (0, 255, 0), 2)
+                    cv2.putText(img, f"Person: {conf:.2f}", (x1, y1 - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 0, 0), 2)
+
+            # Show the image
+            cv2.imshow("Pedestrian Detection", img)
+            cv2.waitKey(1)  # 1 ms wait so it updates the window without blocking
 
         except CvBridgeError as e:
             print(e)

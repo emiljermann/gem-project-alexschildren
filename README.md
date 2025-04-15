@@ -8,3 +8,7 @@
 
 4/14
 - choose median depth unless it is greater than 2 sd different than mean, otherwise use adjusted average.
+
+4/15
+- plot error between where aregg is vs where we think he is
+- plot point where we guess person to be in gnss

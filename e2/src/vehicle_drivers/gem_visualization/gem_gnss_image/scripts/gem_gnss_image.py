@@ -29,9 +29,10 @@ from nav_msgs.msg import Odometry
 from sensor_msgs.msg import Image, CameraInfo
 from cv_bridge import CvBridge, CvBridgeError
 from tf.transformations import euler_from_quaternion, quaternion_from_euler
+import message_filters
 
 # GEM Sensor Headers
-from std_msgs.msg import Float64
+from std_msgs.msg import Float64, Float64MultiArray
 from gps_common.msg import GPSFix
 from sensor_msgs.msg import Imu, NavSatFix
 from novatel_gps_msgs.msg import NovatelPosition, NovatelXYZ, Inspva, NovatelCorrectedImuData
@@ -60,6 +61,11 @@ class GNSSImage(object):
         self.lon      = 0
         self.heading  = 0
         self.gnss_sub = rospy.Subscriber("/novatel/inspva", Inspva, self.inspva_callback)
+        
+        # Pedestrian position plotting
+        self.pedestrian_gnss_sub = rospy.Subscriber("pedestrian_detector/gnss", Float64MultiArray, self.update_pedestrian_pos)
+        self.pedestrian_lat = None
+        self.pedestrian_lon = None
 
         self.lat_start_bt = 40.092722  # 40.09269  
         self.lon_start_l  = -88.236365 # -88.23628
@@ -69,6 +75,11 @@ class GNSSImage(object):
         self.arrow        = 40 
         self.img_width    = 2107
         self.img_height   = 1313
+
+    def update_pedestrian_pos(self, pedestrian_gnss_msg):
+        pedestrian_gnss = pedestrian_gnss_msg.data
+        self.pedestrian_lat = pedestrian_gnss[0]
+        self.pedestrian_lon = pedestrian_gnss[1]
 
 
     def inspva_callback(self, inspva_msg):
@@ -110,6 +121,13 @@ class GNSSImage(object):
             lat_y = int(self.img_height-self.img_height*(self.lat-self.lat_start_bt)/self.lat_scale)
             lon_xd, lat_yd = self.image_heading(lon_x, lat_y, self.heading)
 
+            if self.pedestrian_lat and self.pedestrian_lon:
+                # Plots pedestrians estimated position
+                pedestrian_x = int(self.img_width * (self.pedestrian_lon - self.lon_start_l) / self.lon_scale)
+                pedestrian_y = int(self.img_height - self.img_height * (self.pedestrian_lat - self.lat_start_bt) / self.lat_scale)
+                cv2.circle(pub_image, (pedestrian_x, pedestrian_y), 8, (255, 0, 0), -1)  # filled blue circle
+
+
             pub_image = np.copy(self.map_image)
             cv2.arrowedLine(pub_image, (lon_x, lat_y), (lon_xd, lat_yd), (0, 0, 255), 2)
             cv2.circle(pub_image, (lon_x, lat_y), 12, (0,0,255), 2)
@@ -130,7 +148,7 @@ def main():
     gi = GNSSImage()
 
     try:
-    	gi.start_gi()
+        gi.start_gi()
     except KeyboardInterrupt:
         print ("Shutting down gnss image node.")
         cv2.destroyAllWindows()

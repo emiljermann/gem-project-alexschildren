@@ -28,6 +28,8 @@ from cv_bridge import CvBridge, CvBridgeError
 
 from filters import OnlineFilter
 
+# import alvinxy.alvinxy as axy # Import AlvinXY transformation module
+
 
 # ROS Headers
 import rospy
@@ -36,7 +38,8 @@ import message_filters
 
 # GEM Sensor Headers
 from sensor_msgs.msg import Image
-from std_msgs.msg import String, Header, Bool, Float32, Float64, Float32MultiArray
+from std_msgs.msg import String, Header, Bool, Float32, Float64, Float32MultiArray, Float64MultiArray
+# from novatel_gps_msgs.msg import NovatelPosition, NovatelXYZ, Inspva
 
 # GEM PACMod Headers
 from geometry_msgs.msg import PoseStamped
@@ -61,7 +64,6 @@ class PedestrianDetector:
     4. Waypoint generation for vehicle navigation
     5. Visual feedback through annotated images
     """
-    
     def __init__(self):
         """
         Initialize the lane detection node with model, parameters and ROS connections.
@@ -87,6 +89,8 @@ class PedestrianDetector:
         self.estimated_lane_width_pixels = 200  # Approximate lane width in image pixels
         self.prev_waypoints = None  # Previous waypoints for temporal consistency
         self.endgoal = None  # Target point for navigation
+
+        
         
         ###############################################################################
         # Deep Learning Model Setup
@@ -108,6 +112,14 @@ class PedestrianDetector:
         self.Brake_Distance = 5  # Distance at which to apply brakes (not used currently)
         self.Brake_Duration = 3  # Duration to hold brakes (not used currently)
         self.Conf_Threshold = 0.7 # Confidence threshold to keep person prediction
+        self.wheelbase  = 1.75 # meters
+        self.offset     = 0.46 # meters
+
+        self.olat       = 40.0928563
+        self.olon       = -88.2359994
+
+        self.lon = None
+        self.lat = None
         
         ###############################################################################
         # ROS Communication Setup
@@ -119,11 +131,75 @@ class PedestrianDetector:
         self.sub_depth_img = message_filters.Subscriber('/zed2/zed_node/depth/depth_registered', Image)
         self.ts = message_filters.ApproximateTimeSynchronizer([self.sub_rgb_img, self.sub_depth_img], queue_size=2, slop=0.1)
         self.ts.registerCallback(self.img_callback)
+
+        # Subscribe to GNSS data
+        # self.gnss_sub = rospy.Subscriber("/novatel/inspva", Inspva, self.inspva_callback)
         
         # Publishers for visualization and control
         self.pub_bounding_box = rospy.Publisher("pedestrian_detection/bounding_box", Float32MultiArray, queue_size=1)
         self.pub_rgb_pedestrian_image = rospy.Publisher("pedestrian_detection/rgb/pedestrian_image", Image, queue_size=1)
         self.pub_depth = rospy.Publisher("pedestrian_detection/avg_depth", Float32MultiArray, queue_size=1)
+        self.pub_pedestrian_gnss = rospy.Publisher("pedestrian_detector/gnss", Float64MultiArray)
+    
+
+    ###############################################################################
+    # Pedestrian GNSS Localization
+    ###############################################################################
+
+    def inspva_callback(self, inspva_msg):
+        self.lat     = inspva_msg.latitude  # latitude
+        self.lon     = inspva_msg.longitude # longitude
+        self.heading = inspva_msg.azimuth   # heading in degrees
+
+    def wps_to_local_xy(self, lon_wp, lat_wp):
+        # convert GNSS waypoints into local fixed frame reprented in x and y
+        lon_wp_x, lat_wp_y = axy.ll2xy(lat_wp, lon_wp, self.olat, self.olon)
+        return lon_wp_x, lat_wp_y   
+
+    def get_gem_state(self):
+
+        # vehicle gnss heading (yaw) in degrees
+        # vehicle x, y position in fixed local frame, in meters
+        # reference point is located at the center of GNSS antennas
+        local_x_curr, local_y_curr = self.wps_to_local_xy(self.lon, self.lat)
+
+        # heading to yaw (degrees to radians)
+        # heading is calculated from two GNSS antennas
+        curr_yaw = self.heading_to_yaw(self.heading) 
+
+        # reference point is located at the center of rear axle
+        curr_x = local_x_curr - self.offset * np.cos(curr_yaw)
+        curr_y = local_y_curr - self.offset * np.sin(curr_yaw)
+
+        return round(curr_x, 3), round(curr_y, 3), round(curr_yaw, 4)
+    
+    def local_xy_to_wps(self, local_x, local_y):
+        lat, lon = axy.xy2ll(local_x, local_y, self.olat, self.olon)
+        return lat, lon
+
+    def process_pedestrian_gnss(self, x_ped_cam, y_ped_cam):
+        if not self.lon or not self.lat:
+            print("No gem gnss info yet")
+            return
+        
+        x_gem, y_gem, yaw_gem = self.get_gem_state()
+
+        x_ped = x_ped_cam * np.cos(yaw_gem) - y_ped_cam * np.sin(yaw_gem)
+        y_ped = x_ped_cam * np.sin(yaw_gem) + y_ped_cam * np.sin(yaw_gem)
+
+        x_ped += x_gem
+        y_ped += y_gem
+
+        lat_ped, lon_ped = self.local_xy_to_wps(x_ped, y_ped)
+
+        pedestrian_gnss_msg = Float64MultiArray()
+        pedestrian_gnss_msg.data = [lat_ped, lon_ped]
+
+        self.pub_pedestrian_gnss.publish(pedestrian_gnss_msg)
+
+    ###############################################################################
+    # Pedestrian Detection and Depth Perception Helper Functions
+    ###############################################################################
 
     def letterbox(self, img, new_shape=(384, 640), color=(114, 114, 114)):
         """
@@ -257,7 +333,7 @@ class PedestrianDetector:
 
             # Publish box coordinate data
             box_coords_msg = Float32MultiArray()
-            box_coords_msg.data = list(box_coords)
+            box_coords_msg.data = [x1, y1, x2, y2]
             self.pub_bounding_box.publish(box_coords_msg)
 
             # Extract region of interest from the depth image
@@ -269,10 +345,21 @@ class PedestrianDetector:
                 std_depth = np.std(valid_depths)
                 filtered_depths = valid_depths[(valid_depths > (mean_depth - 2 * std_depth)) & (valid_depths < (mean_depth + 2 * std_depth))]
 
+
                 if filtered_depths.size > 0:
                     avg_depth = np.mean(filtered_depths)
                     med_depth = np.median(filtered_depths)
                     sd_depth = np.std(filtered_depths)
+
+                    # Get x position of pedestrian
+                    u = (x1 + x2) // 2
+                    v = (y1 + y2) // 2
+                    cx = rgb_img.shape[1] / 2
+                    x_cam = (u - cx) * avg_depth / self.Focal_Length
+                    
+                    self.process_pedestrian_gnss(x_cam, avg_depth)
+                    print(x_cam)
+
                 else:
                     avg_depth = med_depth = sd_depth = None
             else:
@@ -281,10 +368,14 @@ class PedestrianDetector:
             # Add rectangle to rgb image
             cv2.rectangle(rgb_img, (x1, y1), (x2, y2), (0, 255, 0), 2)
             cv2.putText(rgb_img, f"Pedestrian: {avg_depth:.2f}m", (x1, y1 - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 0, 0), 2)
+            cv2.circle(rgb_img, (u, v), 4, (0,0,255), -1)
         
         return rgb_img, avg_depth, med_depth, sd_depth
 
-    
+    ###############################################################################
+    # Pedestrian Perception Callback
+    ###############################################################################
+
     def img_callback(self, rgb_img, depth_img):
         try:
             rgb_img = self.bridge.imgmsg_to_cv2(rgb_img, "bgr8")

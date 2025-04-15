@@ -336,24 +336,29 @@ class PedestrianDetector:
             box_coords_msg.data = [x1, y1, x2, y2]
             self.pub_bounding_box.publish(box_coords_msg)
 
+            # Get pixel values
+            chest_y = (3*y1 + y2) // 4
+            chest_delta = 10
+            u = (x1 + x2) // 2
+            v = (y1 + y2) // 2
+
             # Extract region of interest from the depth image
             depth_roi = depth_img[y1:y2, x1:x2]
             valid_depths = depth_roi[np.isfinite(depth_roi) & (depth_roi > 0)]
+
             if valid_depths.size > 0:
                 # Remove outliers: keep values within 2 standard deviations
-                mean_depth = np.mean(valid_depths)
+                mean_depth = np.mean(valid_depths) 
                 std_depth = np.std(valid_depths)
-                filtered_depths = valid_depths[(valid_depths > (mean_depth - 2 * std_depth)) & (valid_depths < (mean_depth + 2 * std_depth))]
-
+                filtered_depths = valid_depths[(valid_depths < (mean_depth + 2 * std_depth))]
 
                 if filtered_depths.size > 0:
                     avg_depth = np.mean(filtered_depths)
                     med_depth = np.median(filtered_depths)
-                    sd_depth = np.std(filtered_depths)
+                    std_depth = np.std(filtered_depths)
 
                     # Get x position of pedestrian
-                    u = (x1 + x2) // 2
-                    v = (y1 + y2) // 2
+                    
                     cx = rgb_img.shape[1] / 2
                     x_cam = (u - cx) * avg_depth / self.Focal_Length
                     
@@ -367,8 +372,8 @@ class PedestrianDetector:
 
             # Add rectangle to rgb image
             cv2.rectangle(rgb_img, (x1, y1), (x2, y2), (0, 255, 0), 2)
-            cv2.putText(rgb_img, f"Pedestrian: {avg_depth:.2f}m", (x1, y1 - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 0, 0), 2)
-            cv2.circle(rgb_img, (u, v), 4, (0,0,255), -1)
+            cv2.putText(rgb_img, f"Mean dist: {avg_depth:.2f}m | Med dist: {med_depth:.2f}m", (x1, y1 - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 0, 0), 2)
+            cv2.circle(rgb_img, (u, chest_y), 4, (0,0,255), -1)
         
         return rgb_img, avg_depth, med_depth, sd_depth
 
@@ -391,7 +396,7 @@ class PedestrianDetector:
             ros_rgb_img = self.bridge.cv2_to_imgmsg(rgb_img, "bgr8")
             self.pub_rgb_pedestrian_image.publish(ros_rgb_img)
 
-            # Publish Depth Data:
+            # Publish Depth Data: @TODO: Only publish with valid depth values
             depth_data = Float32MultiArray()
             depth_data.data = [avg_depth, med_depth, sd_depth]
             self.pub_depth.publish(depth_data)

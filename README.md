@@ -12,3 +12,4 @@
 4/15
 - plot error between where aregg is vs where we think he is
 - plot point where we guess person to be in gnss
+- george bash script to revolutionize your ros development

@@ -212,6 +212,7 @@ class PedestrianDetector:
     def control_vehicle_for_pedestrian(self, pedestrian_distance):
         """
         Controls vehicle speed based on pedestrian proximity
+        Only takes control when pedestrian is within threshold distances
         
         Args:
             pedestrian_distance: Mean distance to pedestrian in meters
@@ -220,35 +221,33 @@ class PedestrianDetector:
         if pedestrian_distance is None or not np.isfinite(pedestrian_distance):
             if self.is_slowing_for_pedestrian:
                 # We were slowing but lost detection - gradually return to normal
-                rospy.loginfo("Pedestrian no longer detected, returning to normal speed")
-                self.pub_speed_command.publish(Float64(self.normal_speed))
-                self.pub_brake_command.publish(Float64(0.0))
+                rospy.loginfo("Pedestrian no longer detected, returning control")
+                # Release control by setting flags, but don't send commands
                 self.is_slowing_for_pedestrian = False
+                self.stop_timer = None
             return
-        
-        # Log the mean distance being used
-        rospy.loginfo(f"Using mean distance to pedestrian: {pedestrian_distance:.2f}m")
         
         # If pedestrian is within stopping threshold
         if pedestrian_distance < self.pedestrian_proximity_threshold:
             if not self.is_slowing_for_pedestrian or self.stop_timer is None:
-                rospy.loginfo(f"Pedestrian detected at {pedestrian_distance:.2f}m - stopping vehicle")
-                # Apply brake and remove throttle
+                rospy.loginfo(f"Pedestrian detected at {pedestrian_distance:.2f}m - taking control and stopping vehicle")
+                # Take control - apply brake and remove throttle
                 self.pub_speed_command.publish(Float64(0.0))
                 self.pub_brake_command.publish(Float64(0.6))  # Moderate braking
                 self.is_slowing_for_pedestrian = True
                 self.stop_timer = rospy.Time.now()
             elif (rospy.Time.now() - self.stop_timer).to_sec() > self.min_stop_duration:
-                # Keep stopped with less brake pressure after initial stop
+                # Hold position with light braking
                 self.pub_brake_command.publish(Float64(0.3))  # Light braking to hold position
         
         # If pedestrian is within slowing threshold but not stopping threshold
         elif pedestrian_distance < self.slowing_threshold:
-            # Calculate a proportional slowdown (more distant = less slowdown)
+            # Calculate a proportional slowdown
             speed_factor = (pedestrian_distance - self.pedestrian_proximity_threshold) / (self.slowing_threshold - self.pedestrian_proximity_threshold)
             target_speed = max(0.05, min(self.normal_speed, speed_factor * self.normal_speed))
             
-            rospy.loginfo(f"Slowing for pedestrian at {pedestrian_distance:.2f}m - speed: {target_speed:.2f}")
+            rospy.loginfo(f"Pedestrian at {pedestrian_distance:.2f}m - taking control and reducing speed to {target_speed:.2f}")
+            # Take control - slow down
             self.pub_speed_command.publish(Float64(target_speed))
             self.pub_brake_command.publish(Float64(0.0))
             self.is_slowing_for_pedestrian = True
@@ -257,11 +256,11 @@ class PedestrianDetector:
         # If pedestrian is beyond slowing threshold
         else:
             if self.is_slowing_for_pedestrian:
-                rospy.loginfo("Pedestrian out of range, returning to normal speed")
-                self.pub_speed_command.publish(Float64(self.normal_speed))
-                self.pub_brake_command.publish(Float64(0.0))
+                rospy.loginfo("Pedestrian out of safe range, returning control to main navigation")
+                # Return to normal by not sending commands but setting flags
                 self.is_slowing_for_pedestrian = False
                 self.stop_timer = None
+            # Don't publish any commands - let other controllers handle it
 
     ###############################################################################
     # Pedestrian Detection and Depth Perception Helper Functions

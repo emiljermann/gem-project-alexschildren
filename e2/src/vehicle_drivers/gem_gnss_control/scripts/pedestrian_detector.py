@@ -41,6 +41,8 @@ from std_msgs.msg import String, Header, Bool, Float32, Float64, Float32MultiArr
 # GEM PACMod Headers
 from geometry_msgs.msg import PoseStamped
 
+import warnings
+warnings.filterwarnings("ignore", category=FutureWarning)
 
 ###############################################################################
 # Lane Detection Node
@@ -243,7 +245,7 @@ class PedestrianDetector:
     
     def process_pedestrian_box(self, box_coords, conf, pad, ratio, rgb_img, depth_img):
 
-        avg_depth, med_depth, sd_depth = None, None, None
+        avg_depth, med_depth, sd_depth, center_depth, first_quartile_depth = None, None, None, None, None
 
         if box_coords and conf > self.Conf_Threshold:
 
@@ -273,16 +275,31 @@ class PedestrianDetector:
                     avg_depth = np.mean(filtered_depths)
                     med_depth = np.median(filtered_depths)
                     sd_depth = np.std(filtered_depths)
-                else:
-                    avg_depth = med_depth = sd_depth = None
-            else:
-                avg_depth = med_depth = sd_depth = None
+                    first_quartile_depth = np.percentile(filtered_depths, 25)
 
+                    center_x = int((x1 + x2) / 2)
+                    center_y = int((y1 + y2) / 2)
+
+                    if 0 <= center_y < depth_img.shape[0] and 0 <= center_x < depth_img.shape[1]:
+                        center_value = depth_img[center_y, center_x]
+                        if np.isfinite(center_value) and center_value > 0:
+                            center_depth = float(center_value)
+                else:
+                    avg_depth = med_depth = sd_depth = center_depth = first_quartile_depth = None
+            else:
+                avg_depth = med_depth = sd_depth = center_depth = first_quartile_depth = None
+            
             # Add rectangle to rgb image
             cv2.rectangle(rgb_img, (x1, y1), (x2, y2), (0, 255, 0), 2)
+
+            cv2.circle(rgb_img, (center_x, center_y), 4, (0, 0, 255), -1)  # red dot
+            if center_depth is not None:
+                cv2.putText(rgb_img, f"{center_depth:.2f}m", (center_x + 5, center_y - 5),
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 255), 2)
+
             cv2.putText(rgb_img, f"Pedestrian: {avg_depth:.2f}m", (x1, y1 - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 0, 0), 2)
         
-        return rgb_img, avg_depth, med_depth, sd_depth
+        return rgb_img, avg_depth, med_depth, sd_depth, center_depth, first_quartile_depth
 
     
     def img_callback(self, rgb_img, depth_img):
@@ -294,15 +311,18 @@ class PedestrianDetector:
 
             box_coords, conf = self.get_pedestrian_box(self.pedestrian_model, resized_img) # Get bounding box of detected pedestrian
 
-            rgb_img, avg_depth, med_depth, sd_depth = self.process_pedestrian_box(box_coords, conf, pad, ratio, rgb_img, depth_img)
+            rgb_img, avg_depth, med_depth, sd_depth, center_depth, first_quartile_depth = self.process_pedestrian_box(box_coords, conf, pad, ratio, rgb_img, depth_img)
 
             # Publish RGB image
             ros_rgb_img = self.bridge.cv2_to_imgmsg(rgb_img, "bgr8")
             self.pub_rgb_pedestrian_image.publish(ros_rgb_img)
 
             # Publish Depth Data:
+            depth_values = [avg_depth, med_depth, sd_depth, center_depth, first_quartile_depth]
+            safe_values = [float(v) if v is not None else float('nan') for v in depth_values]
+
             depth_data = Float32MultiArray()
-            depth_data.data = [avg_depth, med_depth, sd_depth]
+            depth_data.data = safe_values
             self.pub_depth.publish(depth_data)
 
         except CvBridgeError as e:

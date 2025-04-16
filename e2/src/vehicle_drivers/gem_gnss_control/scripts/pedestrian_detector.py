@@ -140,7 +140,19 @@ class PedestrianDetector:
         self.pub_rgb_pedestrian_image = rospy.Publisher("pedestrian_detection/rgb/pedestrian_image", Image, queue_size=1)
         self.pub_depth = rospy.Publisher("pedestrian_detection/avg_depth", Float32MultiArray, queue_size=1)
         self.pub_pedestrian_gnss = rospy.Publisher("pedestrian_detector/gnss", Float64MultiArray)
-    
+
+
+        ###############################################################################
+        # Controller Initialization
+        ###############################################################################
+        self.pub_speed_command = rospy.Publisher("/pacmod/as_rx/accel_cmd", Float64, queue_size=1)
+        self.pub_brake_command = rospy.Publisher("/pacmod/as_rx/brake_cmd", Float64, queue_size=1)
+        self.pedestrian_proximity_threshold = 5.0  # meters
+        self.slowing_threshold = 10.0  # meters
+        self.normal_speed = 0.3  # normal throttle value
+        self.is_slowing_for_pedestrian = False
+        self.min_stop_duration = 3.0  # seconds
+        self.stop_timer = None
 
     ###############################################################################
     # Pedestrian GNSS Localization
@@ -196,6 +208,60 @@ class PedestrianDetector:
         pedestrian_gnss_msg.data = [lat_ped, lon_ped]
 
         self.pub_pedestrian_gnss.publish(pedestrian_gnss_msg)
+
+    def control_vehicle_for_pedestrian(self, pedestrian_distance):
+        """
+        Controls vehicle speed based on pedestrian proximity
+        
+        Args:
+            pedestrian_distance: Mean distance to pedestrian in meters
+        """
+        # No valid distance measurement
+        if pedestrian_distance is None or not np.isfinite(pedestrian_distance):
+            if self.is_slowing_for_pedestrian:
+                # We were slowing but lost detection - gradually return to normal
+                rospy.loginfo("Pedestrian no longer detected, returning to normal speed")
+                self.pub_speed_command.publish(Float64(self.normal_speed))
+                self.pub_brake_command.publish(Float64(0.0))
+                self.is_slowing_for_pedestrian = False
+            return
+        
+        # Log the mean distance being used
+        rospy.loginfo(f"Using mean distance to pedestrian: {pedestrian_distance:.2f}m")
+        
+        # If pedestrian is within stopping threshold
+        if pedestrian_distance < self.pedestrian_proximity_threshold:
+            if not self.is_slowing_for_pedestrian or self.stop_timer is None:
+                rospy.loginfo(f"Pedestrian detected at {pedestrian_distance:.2f}m - stopping vehicle")
+                # Apply brake and remove throttle
+                self.pub_speed_command.publish(Float64(0.0))
+                self.pub_brake_command.publish(Float64(0.6))  # Moderate braking
+                self.is_slowing_for_pedestrian = True
+                self.stop_timer = rospy.Time.now()
+            elif (rospy.Time.now() - self.stop_timer).to_sec() > self.min_stop_duration:
+                # Keep stopped with less brake pressure after initial stop
+                self.pub_brake_command.publish(Float64(0.3))  # Light braking to hold position
+        
+        # If pedestrian is within slowing threshold but not stopping threshold
+        elif pedestrian_distance < self.slowing_threshold:
+            # Calculate a proportional slowdown (more distant = less slowdown)
+            speed_factor = (pedestrian_distance - self.pedestrian_proximity_threshold) / (self.slowing_threshold - self.pedestrian_proximity_threshold)
+            target_speed = max(0.05, min(self.normal_speed, speed_factor * self.normal_speed))
+            
+            rospy.loginfo(f"Slowing for pedestrian at {pedestrian_distance:.2f}m - speed: {target_speed:.2f}")
+            self.pub_speed_command.publish(Float64(target_speed))
+            self.pub_brake_command.publish(Float64(0.0))
+            self.is_slowing_for_pedestrian = True
+            self.stop_timer = None
+        
+        # If pedestrian is beyond slowing threshold
+        else:
+            if self.is_slowing_for_pedestrian:
+                rospy.loginfo("Pedestrian out of range, returning to normal speed")
+                self.pub_speed_command.publish(Float64(self.normal_speed))
+                self.pub_brake_command.publish(Float64(0.0))
+                self.is_slowing_for_pedestrian = False
+                self.stop_timer = None
 
     ###############################################################################
     # Pedestrian Detection and Depth Perception Helper Functions
@@ -358,12 +424,14 @@ class PedestrianDetector:
                     std_depth = np.std(filtered_depths)
 
                     # Get x position of pedestrian
-                    
                     cx = rgb_img.shape[1] / 2
                     x_cam = (u - cx) * avg_depth / self.Focal_Length
                     
+                    # Control vehicle speed based on mean distance to pedestrian
+                    self.control_vehicle_for_pedestrian(avg_depth)
+                    
                     self.process_pedestrian_gnss(x_cam, avg_depth)
-                    print(x_cam)
+                    print(f"Pedestrian at x: {x_cam:.2f}m, mean depth: {avg_depth:.2f}m")
 
                 else:
                     avg_depth = med_depth = sd_depth = None

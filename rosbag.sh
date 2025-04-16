@@ -1,7 +1,7 @@
 #!/bin/bash
 
 
-#USAGE bash rviz_setup.sh ros_bag_path [optional name_of_script]
+#USAGE bash rosbag.sh ros_bag_path [optional name_of_script]
 # CTRL-C to exit
 #   ~/Downloads/2025-04-13-09-22-00.bag
 #   default script is e2/src/vehicle_drivers/gem_gnss_control/scripts/pedestrian_detector.py by default

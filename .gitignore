@@ -1,2 +1,6 @@
+# catkin_make files
 e2/devel/
 e2/build/
+
+# model weight files
+*.pt

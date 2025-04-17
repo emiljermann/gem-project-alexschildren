@@ -112,11 +112,11 @@ class PedestrianDetector:
         self.Brake_Distance = 5  # Distance at which to apply brakes (not used currently)
         self.Brake_Duration = 3  # Duration to hold brakes (not used currently)
         self.Conf_Threshold = 0.7 # Confidence threshold to keep person prediction
-        self.wheelbase  = 1.75 # meters
-        self.offset     = 0.46 # meters
+        self.wheelbase = 1.75 # meters
+        self.offset = 0.46 # meters
 
-        self.olat       = 40.0928563
-        self.olon       = -88.2359994
+        self.olat = 40.0928563
+        self.olon = -88.2359994
 
         self.lon = None
         self.lat = None
@@ -401,7 +401,7 @@ class PedestrianDetector:
             box_coords_msg.data = [x1, y1, x2, y2]
             self.pub_bounding_box.publish(box_coords_msg)
 
-            # Get pixel values
+            # Get bounding box pixel points
             chest_y = (3*y1 + y2) // 4
             chest_delta = 10
             u = (x1 + x2) // 2
@@ -418,31 +418,32 @@ class PedestrianDetector:
                 filtered_depths = valid_depths[(valid_depths < (mean_depth + 2 * std_depth))]
 
                 if filtered_depths.size > 0:
-                    avg_depth = np.mean(filtered_depths)
+                    mean_depth = np.mean(filtered_depths)
                     med_depth = np.median(filtered_depths)
                     std_depth = np.std(filtered_depths)
 
                     # Get x position of pedestrian
                     cx = rgb_img.shape[1] / 2
-                    x_cam = (u - cx) * avg_depth / self.Focal_Length
+                    x_cam = (u - cx) * mean_depth / self.Focal_Length
+                    z_cam = math.sqrt(mean_depth**2 - x_cam**2)
                     
                     # Control vehicle speed based on mean distance to pedestrian
-                    self.control_vehicle_for_pedestrian(avg_depth)
+                    self.control_vehicle_for_pedestrian(mean_depth)
                     
-                    self.process_pedestrian_gnss(x_cam, avg_depth)
-                    print(f"Pedestrian at x: {x_cam:.2f}m, mean depth: {avg_depth:.2f}m")
+                    self.process_pedestrian_gnss(x_cam, z_cam)
+                    # print(f"Pedestrian at x: {x_cam:.2f}m, mean depth: {mean_depth:.2f}m")
 
                 else:
-                    avg_depth = med_depth = sd_depth = None
+                    mean_depth = med_depth = sd_depth = None
             else:
-                avg_depth = med_depth = sd_depth = None
+                mean_depth = med_depth = sd_depth = None
 
             # Add rectangle to rgb image
             cv2.rectangle(rgb_img, (x1, y1), (x2, y2), (0, 255, 0), 2)
-            cv2.putText(rgb_img, f"Mean dist: {avg_depth:.2f}m | Med dist: {med_depth:.2f}m", (x1, y1 - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 0, 0), 2)
+            cv2.putText(rgb_img, f"Mean dist: {mean_depth:.2f}m | Med dist: {med_depth:.2f}m", (x1, y1 - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 0, 0), 2)
             cv2.circle(rgb_img, (u, chest_y), 4, (0,0,255), -1)
         
-        return rgb_img, avg_depth, med_depth, sd_depth
+        return rgb_img, mean_depth, med_depth, sd_depth
 
     ###############################################################################
     # Pedestrian Perception Callback
@@ -463,17 +464,13 @@ class PedestrianDetector:
             ros_rgb_img = self.bridge.cv2_to_imgmsg(rgb_img, "bgr8")
             self.pub_rgb_pedestrian_image.publish(ros_rgb_img)
 
-            # Publish Depth Data: @TODO: Only publish with valid depth values
+            # Publish Depth Data: (publishes [none, none, none] if no pedestrian is detected)
             depth_data = Float32MultiArray()
             depth_data.data = [avg_depth, med_depth, sd_depth]
             self.pub_depth.publish(depth_data)
 
         except CvBridgeError as e:
             print(e)
-    
-    def detect_pedestrians(self, img):
-        # @TODO: Maybe post process bounding box info in some way?
-        return None
 
 
 ###############################################################################
@@ -486,7 +483,7 @@ if __name__ == "__main__":
         detector = PedestrianDetector()
         
         # Keep node running until shutdown
-        rate = rospy.spin() #r ospy.Rate(10)  # 10 Hz control loop
+        rate = rospy.spin() # rospy.Rate(10)  # 10 Hz control loop
     except rospy.ROSInterruptException:
         pass
 

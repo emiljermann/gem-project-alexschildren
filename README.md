@@ -1,4 +1,21 @@
-# gem-project-alexschildren
+# gem_project_alexschildren
+
+<details>
+<summary>Project Structure</summary>
+
+```
+gem_project_alexschildren/
+├── e2/             # Main control system
+├── dev_utils/          # Small test scripts and experimental code used during development
+├── diagrams/               # Diagrams for development planning
+├── tutorials/                # Environment and framework setup guides
+├── plots/                # Error plots used during development and testing
+├── bash_scripts/            # Scripts for module testing and deployment
+├── README.md            # Project overview and setup instructions
+└── .gitignore           # Git ignore rules
+```
+
+<h2>Notes</h2>
 
 3/28
 - Use GNSS to check if vehicle has arrived at destination point

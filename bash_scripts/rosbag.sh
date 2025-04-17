@@ -10,7 +10,7 @@
 ROSBAG="$1"
 
 if [ $# -lt 2 ]; then
-    SCRIPTS=("e2/src/vehicle_drivers/gem_gnss_control/scripts/pedestrian_detector.py" "e2/src/vehicle_drivers/gem_gnss_control/scripts/image_printer.py")
+    SCRIPTS=("e2/src/vehicle_drivers/gem_gnss_control/scripts/pedestrian_detector.py" "dev_utils/image_printer.py")
 else
     SCRIPTS="${@:2}"
 fi

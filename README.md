@@ -6,13 +6,13 @@
 ```
 gem_project_alexschildren/
 ├── e2/             # Main control system
-├── dev_utils/          # Small test scripts and experimental code used during development
-├── diagrams/               # Diagrams for development planning
-├── tutorials/                # Environment and framework setup guides
-├── plots/                # Error plots used during development and testing
-├── bash_scripts/            # Scripts for module testing and deployment
-├── README.md            # Project overview and setup instructions
-└── .gitignore           # Git ignore rules
+├── dev_utils/      # Small test scripts and experimental code used during development
+├── diagrams/       # Diagrams for development planning
+├── tutorials/      # Environment and framework setup guides
+├── plots/          # Error plots used during development and testing
+├── bash_scripts/   # Scripts for module testing and deployment
+├── README.md       # Project overview and setup instructions
+└── .gitignore      # Git ignore rules
 ```
 </details>
 <h2>Notes</h2>

@@ -28,3 +28,9 @@ $ rostopic list # lists all current rostopics, helpful to check bag is publishin
 $ rosbag info rosbag_filename.bag # Lists info on rosbag including the rostopics it will publish (and previously recorded)
 $ rviz # Brings up rviz and if the bag and scripts are running you can view the published topics like you're on the gem car. Better for debugging imo
 ```
+
+__Recording Rosbags__
+The following collects rgb and depth camera parameters, rgb image, depth image, gps position and orientation, lidar point cloud, and imu.
+```shell
+$ rosbag record /zed2/zed_node/rgb/camera_info /zed2/zed_node/rgb/image_rect_color /novatel/imu /novatel/inspva /novatel/bestpos /lidar1/velodyne_points /zed2/zed_node/imu/data /zed2/zed_node/imu/data_raw /zed2/zed_node/imu/mag /zed2/zed_node/depth/camera_info /zed2/zed_node/depth/depth_registered
+```

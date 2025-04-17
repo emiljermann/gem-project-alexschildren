@@ -132,8 +132,8 @@ class PedestrianDetector:
         # ###############################################################################
         # # Controller Initialization
         # ###############################################################################
-        # self.pub_speed_command = rospy.Publisher("/pacmod/as_rx/accel_cmd", Float64, queue_size=1)
-        # self.pub_brake_command = rospy.Publisher("/pacmod/as_rx/brake_cmd", Float64, queue_size=1)
+        self.pub_speed_command = rospy.Publisher("/pacmod/as_rx/accel_cmd", Float64, queue_size=1)
+        self.pub_brake_command = rospy.Publisher("/pacmod/as_rx/brake_cmd", Float64, queue_size=1)
         # self.pedestrian_proximity_threshold = 5.0  # meters
         # self.slowing_threshold = 10.0  # meters
         # self.normal_speed = 0.3  # normal throttle value
@@ -204,56 +204,22 @@ class PedestrianDetector:
 
     def control_vehicle_for_pedestrian(self, pedestrian_distance):
         """
-        Controls vehicle speed based on pedestrian proximity
-        Only takes control when pedestrian is within threshold distances
+        If the pedestrian is within 5 m, apply a full brake. Otherwise, do nothing.
         
         Args:
             pedestrian_distance: Mean distance to pedestrian in meters
         """
-        # No valid distance measurement
+        # Only act when we have a valid measurement
         if pedestrian_distance is None or not np.isfinite(pedestrian_distance):
-            if self.is_slowing_for_pedestrian:
-                # We were slowing but lost detection - gradually return to normal
-                rospy.loginfo("Pedestrian no longer detected, returning control")
-                # Release control by setting flags, but don't send commands
-                self.is_slowing_for_pedestrian = False
-                self.stop_timer = None
             return
-        
-        # If pedestrian is within stopping threshold
-        if pedestrian_distance < self.pedestrian_proximity_threshold:
-            if not self.is_slowing_for_pedestrian or self.stop_timer is None:
-                rospy.loginfo(f"Pedestrian detected at {pedestrian_distance:.2f}m - taking control and stopping vehicle")
-                # Take control - apply brake and remove throttle
-                self.pub_speed_command.publish(Float64(0.0))
-                self.pub_brake_command.publish(Float64(0.6))  # Moderate braking
-                self.is_slowing_for_pedestrian = True
-                self.stop_timer = rospy.Time.now()
-            elif (rospy.Time.now() - self.stop_timer).to_sec() > self.min_stop_duration:
-                # Hold position with light braking
-                self.pub_brake_command.publish(Float64(0.3))  # Light braking to hold position
-        
-        # If pedestrian is within slowing threshold but not stopping threshold
-        elif pedestrian_distance < self.slowing_threshold:
-            # Calculate a proportional slowdown
-            speed_factor = (pedestrian_distance - self.pedestrian_proximity_threshold) / (self.slowing_threshold - self.pedestrian_proximity_threshold)
-            target_speed = max(0.05, min(self.normal_speed, speed_factor * self.normal_speed))
-            
-            rospy.loginfo(f"Pedestrian at {pedestrian_distance:.2f}m - taking control and reducing speed to {target_speed:.2f}")
-            # Take control - slow down
-            self.pub_speed_command.publish(Float64(target_speed))
-            self.pub_brake_command.publish(Float64(0.0))
-            self.is_slowing_for_pedestrian = True
-            self.stop_timer = None
-        
-        # If pedestrian is beyond slowing threshold
-        else:
-            if self.is_slowing_for_pedestrian:
-                rospy.loginfo("Pedestrian out of safe range, returning control to main navigation")
-                # Return to normal by not sending commands but setting flags
-                self.is_slowing_for_pedestrian = False
-                self.stop_timer = None
-            # Don't publish any commands - let other controllers handle it
+
+        # Hard brake if within 5 m
+        if pedestrian_distance <= 5.0:
+            rospy.loginfo(f"Pedestrian within 5m ({pedestrian_distance:.2f} m) – applying hard brake")
+            self.pub_speed_command.publish(Float64(0.0))
+            self.pub_brake_command.publish(Float64(1.0))  # Max braking
+        # else: do nothing, other controllers remain in charge
+
 
     ###############################################################################
     # Pedestrian Detection and Depth Perception Helper Functions
@@ -387,7 +353,8 @@ class PedestrianDetector:
                     z_cam = math.sqrt(mean_depth**2 - x_cam**2)
                     
                     # Control vehicle speed based on mean distance to pedestrian
-                    # self.control_vehicle_for_pedestrian(mean_depth) @TODO: Uncomment 
+                    if mean_depth is not None:
+                        self.control_vehicle_for_pedestrian(mean_depth) 
                     
                     # self.process_pedestrian_gnss(x_cam, z_cam) @TODO: Uncomment 
                     # print(f"Pedestrian at x: {x_cam:.2f}m, mean depth: {mean_depth:.2f}m")

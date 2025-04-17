@@ -28,7 +28,7 @@ import message_filters
 # GEM Sensor Headers
 from sensor_msgs.msg import Image
 from std_msgs.msg import String, Header, Bool, Float32, Float64, Float32MultiArray, Float64MultiArray
-# from novatel_gps_msgs.msg import NovatelPosition, NovatelXYZ, Inspva
+# from novatel_gps_msgs.msg import NovatelPosition, NovatelXYZ, Inspva @TODO: Uncomment
 
 # GEM PACMod Headers
 from geometry_msgs.msg import PoseStamped
@@ -120,7 +120,7 @@ class PedestrianDetector:
         self.ts.registerCallback(self.img_callback)
 
         # Subscribe to GNSS data
-        # self.gnss_sub = rospy.Subscriber("/novatel/inspva", Inspva, self.inspva_callback)
+        # self.gnss_sub = rospy.Subscriber("/novatel/inspva", Inspva, self.inspva_callback) @TODO: Uncomment
         
         # Publishers for visualization and control
         self.pub_bounding_box = rospy.Publisher("pedestrian_detection/bounding_box", Float32MultiArray, queue_size=1)
@@ -368,7 +368,7 @@ class PedestrianDetector:
             if valid_depths.size > 0:
 
                 # Calculate distribution parameter estimates
-                mean_depth = np.mean(valid_depths) 
+                mean_depth = np.mean(valid_depths)
                 std_depth = np.std(valid_depths)
 
                 # Keep values in the first quartile

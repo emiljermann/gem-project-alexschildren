@@ -1,17 +1,5 @@
 #!/usr/bin/env python3
 
-#================================================================
-# File name: pedestrian_detector.py                                                                  
-# Description: learning-based lane detection module                                                            
-# Author: Siddharth Anand
-# Email: sanand12@illinois.edu                                                                 
-# Date created: 08/02/2021                                                                
-# Date last modified: 03/14/2025
-# Version: 1.0                                                                   
-# Usage: python lane_detection.py                                                                      
-# Python version: 3.8                                                             
-#================================================================
-
 from __future__ import print_function
 
 # Python Headers
@@ -25,11 +13,12 @@ import numpy as np
 from numpy import linalg as la
 import scipy.signal as signal
 from cv_bridge import CvBridge, CvBridgeError
+import matplotlib.pyplot as plt
+import datetime
 
 from filters import OnlineFilter
 
 # import alvinxy.alvinxy as axy # Import AlvinXY transformation module
-
 
 # ROS Headers
 import rospy
@@ -49,6 +38,8 @@ from geometry_msgs.msg import PoseStamped
 # Pedestrian Detector Node
 # 
 # This module implements deep learning-based pedestrian detection using YOLOv5n.
+#
+# python3 -W ignore pedestrian_detector.py
 ###############################################################################
 
 class PedestrianDetector:
@@ -96,7 +87,7 @@ class PedestrianDetector:
         self.device = 'cuda' if torch.cuda.is_available() else 'cpu'
 
         # Commented out stop sign detection model code
-        self.pedestrian_model = torch.hub.load('ultralytics/yolov5', 'yolov5n', pretrained=True, trust_repo=True)
+        self.pedestrian_model = torch.hub.load('ultralytics/yolov5', 'yolov5s', pretrained=True, trust_repo=True)
         self.pedestrian_model.to(self.device).eval()
         
         ###############################################################################
@@ -138,17 +129,19 @@ class PedestrianDetector:
         self.pub_pedestrian_gnss = rospy.Publisher("pedestrian_detector/gnss", Float64MultiArray)
 
 
-        ###############################################################################
-        # Controller Initialization
-        ###############################################################################
-        self.pub_speed_command = rospy.Publisher("/pacmod/as_rx/accel_cmd", Float64, queue_size=1)
-        self.pub_brake_command = rospy.Publisher("/pacmod/as_rx/brake_cmd", Float64, queue_size=1)
-        self.pedestrian_proximity_threshold = 5.0  # meters
-        self.slowing_threshold = 10.0  # meters
-        self.normal_speed = 0.3  # normal throttle value
-        self.is_slowing_for_pedestrian = False
-        self.min_stop_duration = 3.0  # seconds
-        self.stop_timer = None
+        # ###############################################################################
+        # # Controller Initialization
+        # ###############################################################################
+        # self.pub_speed_command = rospy.Publisher("/pacmod/as_rx/accel_cmd", Float64, queue_size=1)
+        # self.pub_brake_command = rospy.Publisher("/pacmod/as_rx/brake_cmd", Float64, queue_size=1)
+        # self.pedestrian_proximity_threshold = 5.0  # meters
+        # self.slowing_threshold = 10.0  # meters
+        # self.normal_speed = 0.3  # normal throttle value
+        # self.is_slowing_for_pedestrian = False
+        # self.min_stop_duration = 3.0  # seconds
+        # self.stop_timer = None
+
+        self.last_save_time = rospy.Time.now()
 
     ###############################################################################
     # Pedestrian GNSS Localization
@@ -204,6 +197,10 @@ class PedestrianDetector:
         pedestrian_gnss_msg.data = [lat_ped, lon_ped]
 
         self.pub_pedestrian_gnss.publish(pedestrian_gnss_msg)
+
+    ###############################################################################
+    # Vehicle Control Functions
+    ###############################################################################
 
     def control_vehicle_for_pedestrian(self, pedestrian_distance):
         """
@@ -338,7 +335,7 @@ class PedestrianDetector:
     
     def process_pedestrian_box(self, box_coords, conf, pad, ratio, rgb_img, depth_img):
 
-        avg_depth, med_depth, sd_depth = None, None, None
+        mean_depth, med_depth, std_depth = None, None, None
 
         if box_coords and conf > self.Conf_Threshold:
 
@@ -366,7 +363,7 @@ class PedestrianDetector:
             valid_depths = depth_roi[np.isfinite(depth_roi) & (depth_roi > 0)]
 
             # Plot depth values to show distribution
-            self.plot_depths_distribution(valid_depths.flatten())
+            # self.plot_depths_distribution(valid_depths.flatten(), rgb_img)
 
             if valid_depths.size > 0:
 
@@ -390,9 +387,9 @@ class PedestrianDetector:
                     z_cam = math.sqrt(mean_depth**2 - x_cam**2)
                     
                     # Control vehicle speed based on mean distance to pedestrian
-                    self.control_vehicle_for_pedestrian(mean_depth)
+                    # self.control_vehicle_for_pedestrian(mean_depth) @TODO: Uncomment 
                     
-                    self.process_pedestrian_gnss(x_cam, z_cam)
+                    # self.process_pedestrian_gnss(x_cam, z_cam) @TODO: Uncomment 
                     # print(f"Pedestrian at x: {x_cam:.2f}m, mean depth: {mean_depth:.2f}m")
 
                 else:
@@ -406,13 +403,33 @@ class PedestrianDetector:
             cv2.circle(rgb_img, (u, chest_y), 4, (0,0,255), -1)
         
         return rgb_img, mean_depth, med_depth, std_depth
-    
-    def plot_depths_distribution(self, depth_vals):
-        return None # @TODO: Not implemented
-        fig, axs = plt.subplots(1, 1, sharey=True, tight_layout=True)
 
-        n_bins = 40
-        axs[0].hist(depth_vals, bins=n_bins)
+    ###############################################################################
+    # Debugging Helper Functions
+    ###############################################################################    
+    
+    def plot_depths_distribution(self, depth_vals, rgb_img):
+        now = rospy.Time.now()
+
+        if (now - self.last_save_time).to_sec() >= 1.0:
+            dt = datetime.datetime.fromtimestamp(now.to_sec())
+            timestamp = dt.strftime("%Y-%m-%d_%H-%M-%S")
+
+            fig, axs = plt.subplots(1, 2, figsize=(10, 4), tight_layout=True)
+
+            # Plot depth on the left
+            axs[0].hist(depth_vals, bins=40)
+            axs[0].set_title("Depth Histogram")
+
+            # Show rgb_img on the right
+            axs[1].imshow(cv2.cvtColor(rgb_img, cv2.COLOR_BGR2RGB))
+            axs[1].set_title("Camera Image")
+            axs[1].axis('off')  # Hide axis for image
+
+            fig.savefig(f"{timestamp}_combined.png")
+            plt.close(fig)
+
+            self.last_save_time = now
         
 
     ###############################################################################

@@ -14,7 +14,7 @@ gem_project_alexschildren/
 ├── README.md            # Project overview and setup instructions
 └── .gitignore           # Git ignore rules
 ```
-
+</details>
 <h2>Notes</h2>
 
 3/28

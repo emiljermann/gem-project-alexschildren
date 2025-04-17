@@ -46,11 +46,9 @@ from geometry_msgs.msg import PoseStamped
 
 
 ###############################################################################
-# Lane Detection Node
+# Pedestrian Detector Node
 # 
-# This module implements deep learning-based lane detection using YOLOPv2.
-# It processes images from a camera, identifies lane markings, and publishes
-# waypoints for autonomous navigation.
+# This module implements deep learning-based pedestrian detection using YOLOv5n.
 ###############################################################################
 
 class PedestrianDetector:
@@ -90,8 +88,6 @@ class PedestrianDetector:
         self.prev_waypoints = None  # Previous waypoints for temporal consistency
         self.endgoal = None  # Target point for navigation
 
-        
-        
         ###############################################################################
         # Deep Learning Model Setup
         ###############################################################################
@@ -312,54 +308,12 @@ class PedestrianDetector:
         
         return img, ratio, (dw, dh)
     
-    
-    def get_pedestrian_box_multi(self, model, frames):
-        """
-        Gets pose points from a given YOLO model and frame.
-        Args:
-            model: YOLO model.
-            frame: Frame from the camera.
-        Returns:
-            bounding_box: bounding box of person with highest confidence, None otherwise
-            in format (top-left-x, top-left-y, bottom-right-x, bottom-right-y)
-            
-            confidence: confidence score that said pedestrian exists
-        """
-        with torch.no_grad():
-            results = model(frames).pandas().xyxy
-
-        if len(results) == 0:
-            return None, 0
-        
-        all_box_coords, all_highest_conf = [], []
-
-        for result in results:
-            box_coords = None
-            highest_conf = 0
-            for obj in result.itertuples():
-                if obj.name == "person":
-                    boxes = (obj.xmin, obj.ymin, obj.xmax, obj.ymax)
-                    confidence = obj.confidence
-                    if confidence > highest_conf:
-                        highest_conf = confidence
-                        box_coords = boxes
-                        highest_conf = confidence
-                    break
-            all_box_coords.append(box_coords)
-            all_highest_conf.append(highest_conf)
-
-        return all_box_coords, all_highest_conf 
-    
     def get_pedestrian_box(self, model, frame):
         """
-        Gets pose points from a given YOLO model and frame.
-        Args:
-            model: YOLO model.
-            frame: Frame from the camera.
+        Gets pose points from a given YOLO model and image frame.
         Returns:
             bounding_box: bounding box of person with highest confidence, None otherwise
-            in format (top-left-x, top-left-y, bottom-right-x, bottom-right-y)
-            
+                          in format (top-left-x, top-left-y, bottom-right-x, bottom-right-y)
             confidence: confidence score that said pedestrian exists
         """
         with torch.no_grad():
@@ -411,11 +365,19 @@ class PedestrianDetector:
             depth_roi = depth_img[y1:y2, x1:x2]
             valid_depths = depth_roi[np.isfinite(depth_roi) & (depth_roi > 0)]
 
+            # Plot depth values to show distribution
+            self.plot_depths_distribution(valid_depths.flatten())
+
             if valid_depths.size > 0:
-                # Remove outliers: keep values within 2 standard deviations
+
+                # Calculate distribution parameter estimates
                 mean_depth = np.mean(valid_depths) 
                 std_depth = np.std(valid_depths)
-                filtered_depths = valid_depths[(valid_depths < (mean_depth + 2 * std_depth))]
+
+                # Keep values in the first quartile
+                flattened_valid_depths = valid_depths.flatten()
+                first_quartile_val = np.quantile(flattened_valid_depths, 0.25)
+                filtered_depths = flattened_valid_depths[flattened_valid_depths <= first_quartile_val]
 
                 if filtered_depths.size > 0:
                     mean_depth = np.mean(filtered_depths)
@@ -434,16 +396,24 @@ class PedestrianDetector:
                     # print(f"Pedestrian at x: {x_cam:.2f}m, mean depth: {mean_depth:.2f}m")
 
                 else:
-                    mean_depth = med_depth = sd_depth = None
+                    mean_depth = med_depth = std_depth = None
             else:
-                mean_depth = med_depth = sd_depth = None
+                mean_depth = med_depth = std_depth = None
 
             # Add rectangle to rgb image
             cv2.rectangle(rgb_img, (x1, y1), (x2, y2), (0, 255, 0), 2)
             cv2.putText(rgb_img, f"Mean dist: {mean_depth:.2f}m | Med dist: {med_depth:.2f}m", (x1, y1 - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 0, 0), 2)
             cv2.circle(rgb_img, (u, chest_y), 4, (0,0,255), -1)
         
-        return rgb_img, mean_depth, med_depth, sd_depth
+        return rgb_img, mean_depth, med_depth, std_depth
+    
+    def plot_depths_distribution(self, depth_vals):
+        return None # @TODO: Not implemented
+        fig, axs = plt.subplots(1, 1, sharey=True, tight_layout=True)
+
+        n_bins = 40
+        axs[0].hist(depth_vals, bins=n_bins)
+        
 
     ###############################################################################
     # Pedestrian Perception Callback
@@ -458,7 +428,7 @@ class PedestrianDetector:
 
             box_coords, conf = self.get_pedestrian_box(self.pedestrian_model, resized_img) # Get bounding box of detected pedestrian
 
-            rgb_img, avg_depth, med_depth, sd_depth = self.process_pedestrian_box(box_coords, conf, pad, ratio, rgb_img, depth_img)
+            rgb_img, avg_depth, med_depth, std_depth = self.process_pedestrian_box(box_coords, conf, pad, ratio, rgb_img, depth_img)
 
             # Publish RGB image
             ros_rgb_img = self.bridge.cv2_to_imgmsg(rgb_img, "bgr8")
@@ -466,7 +436,7 @@ class PedestrianDetector:
 
             # Publish Depth Data: (publishes [none, none, none] if no pedestrian is detected)
             depth_data = Float32MultiArray()
-            depth_data.data = [avg_depth, med_depth, sd_depth]
+            depth_data.data = [avg_depth, med_depth, std_depth]
             self.pub_depth.publish(depth_data)
 
         except CvBridgeError as e:

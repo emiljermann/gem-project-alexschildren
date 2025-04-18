@@ -69,7 +69,9 @@ class PurePursuit(object):
         self.max_accel     = 0.48 # % of acceleration
         self.pid_speed     = PID(0.5, 0.0, 0.1, wg=20)
         self.speed_filter  = OnlineFilter(1.2, 30, 4)
-
+        self.stop_wp_index = rospy.get_param("~stop_waypoint_index", 120)  
+        self.stop_dist     = rospy.get_param("~stop_distance_thresh", 1.0)
+        self.stopped       = False
         # -------------------- PACMod setup --------------------
 
         self.gem_enable    = False
@@ -142,6 +144,17 @@ class PurePursuit(object):
         else:
             steer_angle = 0.0
         return steer_angle
+
+    def _apply_brakes(self):
+        self.accel_cmd.enable = False
+        self.accel_cmd.f64_cmd = 0.0
+        self.brake_cmd.enable = True
+        self.brake_cmd.f64_cmd = 0.5
+        self.accel_pub.publish(self.accel_cmd)
+        self.brake_pub.publish(self.brake_cmd)
+        self.turn_cmd.ui16_cmd = 1
+        self.turn_pub.publish(self.turn_cmd)
+
 
     def read_waypoints(self):
         # read recorded GPS lat, lon, heading
@@ -254,7 +267,17 @@ class PurePursuit(object):
             # finding the distance between the goal point and the vehicle
             # true look-ahead distance between a waypoint and current position
             L = self.dist_arr[self.goal]
+            
+            if (not self.stopped and self.stop_wp_index >= 0 and self.goal >= self.stop_wp_index and L <= self.stop_dist):                 
+                rospy.loginfo("Reached stop waypoint %d  (d=%.2fm) - braking", self.stop_wp_index, L)
+                self._apply_brakes()
+                self.stopped = True
 
+            if self.stopped:
+                self.rate.sleep()
+                continue
+
+            
             # find the curvature and the angle 
             alpha = self.heading_to_yaw(self.path_points_heading[self.goal]) - curr_yaw
 
@@ -319,5 +342,4 @@ def pure_pursuit():
 
 if __name__ == '__main__':
     pure_pursuit()
-
 

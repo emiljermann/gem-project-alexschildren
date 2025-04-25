@@ -61,10 +61,10 @@ class GNSSImage(object):
         self.lat     = 0
         self.lon     = 0
         self.heading = 0
-        # self.gps_sub = rospy.Subscriber("/septentrio_gnss/navsatfix", NavSatFix, self.gps_callback)
-        # self.ins_sub = rospy.Subscriber("/septentrio_gnss/insnavgeod", INSNavGeod, self.ins_callback)
-        self.gps_sub = rospy.Subscriber("/novatel/fix", NavSatFix, self.gps_callback)
-        self.ins_sub = rospy.Subscriber("/novatel/inscov", Inspva, self.ins_callback)
+        self.gps_sub = rospy.Subscriber("/septentrio_gnss/navsatfix", NavSatFix, self.gps_callback)
+        self.ins_sub = rospy.Subscriber("/septentrio_gnss/insnavgeod", INSNavGeod, self.ins_callback)
+        # self.gps_sub = rospy.Subscriber("/novatel/fix", NavSatFix, self.gps_callback)
+        # self.ins_sub = rospy.Subscriber("/novatel/inscov", Inspva, self.ins_callback)
 
         self.lat_start_bt = 40.092722  # 40.09269  
         self.lon_start_l  = -88.236365 # -88.23628

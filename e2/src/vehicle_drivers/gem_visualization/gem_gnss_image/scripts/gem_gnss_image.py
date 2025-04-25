@@ -5,7 +5,7 @@
 # Description        : show vehicle's heading and position in an image                                                                
 # Author             : Hang Cui (hangcui3@illinois.edu)                                                                     
 # Date created       : 08/13/2022                                                                
-# Date last modified : 01/25/2023                                                            
+# Date last modified : 03/02/2024                                                            
 # Version            : 0.2                                                                    
 # Usage              : rosrun gem_gnss gem_gnss_image.py                                                                      
 # Python version     : 3.8                                                             
@@ -36,6 +36,8 @@ from std_msgs.msg import Float64, Float64MultiArray
 from gps_common.msg import GPSFix
 from sensor_msgs.msg import Imu, NavSatFix
 from novatel_gps_msgs.msg import NovatelPosition, NovatelXYZ, Inspva, NovatelCorrectedImuData
+from sensor_msgs.msg import NavSatFix
+from septentrio_gnss_driver.msg import INSNavGeod
 
 image_file  = 'gnss_map.png'
 curr_path = os.path.abspath(__file__) 
@@ -57,15 +59,13 @@ class GNSSImage(object):
         self.map_image_pub = rospy.Publisher("/motion_image", Image, queue_size=1) 
 
         # Subscribe information from sensors
-        self.lat      = 0
-        self.lon      = 0
-        self.heading  = 0
-        self.gnss_sub = rospy.Subscriber("/novatel/inspva", Inspva, self.inspva_callback)
-        
-        # Pedestrian position plotting
-        self.pedestrian_gnss_sub = rospy.Subscriber("pedestrian_detector/gnss", Float64MultiArray, self.update_pedestrian_pos)
-        self.pedestrian_lat = None
-        self.pedestrian_lon = None
+        self.lat     = 0
+        self.lon     = 0
+        self.heading = 0
+        self.gps_sub = rospy.Subscriber("/septentrio_gnss/navsatfix", NavSatFix, self.gps_callback)
+        self.ins_sub = rospy.Subscriber("/septentrio_gnss/insnavgeod", INSNavGeod, self.ins_callback)
+        # self.gps_sub = rospy.Subscriber("/novatel/fix", NavSatFix, self.gps_callback)
+        # self.ins_sub = rospy.Subscriber("/novatel/inscov", Inspva, self.ins_callback)
 
         self.lat_start_bt = 40.092722  # 40.09269  
         self.lon_start_l  = -88.236365 # -88.23628
@@ -76,16 +76,13 @@ class GNSSImage(object):
         self.img_width    = 2107
         self.img_height   = 1313
 
-    def update_pedestrian_pos(self, pedestrian_gnss_msg):
-        pedestrian_gnss = pedestrian_gnss_msg.data
-        self.pedestrian_lat = pedestrian_gnss[0]
-        self.pedestrian_lon = pedestrian_gnss[1]
 
+    def gps_callback(self, msg):
+        self.lat     = msg.latitude
+        self.lon     = msg.longitude
 
-    def inspva_callback(self, inspva_msg):
-        self.lat     = inspva_msg.latitude
-        self.lon     = inspva_msg.longitude
-        self.heading = inspva_msg.azimuth 
+    def ins_callback(self, msg):
+        self.heading = round(msg.heading, 1) 
 
 
     def image_heading(self, lon_x, lat_y, heading):
@@ -129,8 +126,11 @@ class GNSSImage(object):
 
 
             pub_image = np.copy(self.map_image)
-            cv2.arrowedLine(pub_image, (lon_x, lat_y), (lon_xd, lat_yd), (0, 0, 255), 2)
-            cv2.circle(pub_image, (lon_x, lat_y), 12, (0,0,255), 2)
+
+            if(lon_x >= 0 and lon_x <= self.img_width and lon_xd >= 0 and lon_xd <= self.img_width and 
+                lat_y >= 0 and lat_y <= self.img_height and lat_yd >= 0 and lat_yd <= self.img_height):
+                cv2.arrowedLine(pub_image, (lon_x, lat_y), (lon_xd, lat_yd), (0, 0, 255), 2)
+                cv2.circle(pub_image, (lon_x, lat_y), 12, (0,0,255), 2)
 
             try:
                 # Convert OpenCV image to ROS image and publish

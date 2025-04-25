@@ -6,7 +6,7 @@
 # Author: Hang Cui
 # Email: hangcui3@illinois.edu                                                                     
 # Date created: 07/10/2021                                                                
-# Date last modified: 07/30/2022                                                          
+# Date last modified: 02/29/2024                                                          
 # Version: 0.1                                                                    
 # Usage: rosrun gem_gnss gem_rviz_text.py                                                                     
 # Python version: 3.8                                                             
@@ -18,9 +18,10 @@ import random
 import numpy as np
 
 from geometry_msgs.msg import Twist
-from novatel_gps_msgs.msg import Inspva, NovatelPosition, NovatelExtendedSolutionStatus
 from jsk_rviz_plugins.msg import OverlayText
 from std_msgs.msg import ColorRGBA, Float32, Float64
+from sensor_msgs.msg import NavSatFix
+from septentrio_gnss_driver.msg import INSNavGeod, PVTGeodetic
 
 # GEM PACMod Headers
 from pacmod_msgs.msg import PositionWithSpeed, PacmodCmd, SystemRptFloat, VehicleSpeedRpt
@@ -31,8 +32,9 @@ class GEMOverlay(object):
     def __init__(self):
           
         self.text_pub     = rospy.Publisher("/gem_rviz_text", OverlayText, queue_size=5)
-        self.gps_sub      = rospy.Subscriber("/novatel/inspva", Inspva, self.gps_callback)
-        self.rtk_sub      = rospy.Subscriber("/novatel/bestpos", NovatelPosition, self.rtk_callback)
+        self.gps_sub      = rospy.Subscriber("/septentrio_gnss/navsatfix", NavSatFix, self.gps_callback)
+        self.ins_sub      = rospy.Subscriber("/septentrio_gnss/insnavgeod", INSNavGeod, self.ins_callback)
+        self.rtk_sub      = rospy.Subscriber("/septentrio_gnss/pvtgeodetic", PVTGeodetic, self.rtk_callback)
         self.speed_sub    = rospy.Subscriber("/pacmod/parsed_tx/vehicle_speed_rpt", VehicleSpeedRpt, self.speed_callback)
         self.steer_sub    = rospy.Subscriber("/pacmod/parsed_tx/steer_rpt", SystemRptFloat, self.steer_callback)
         self.overlaytext  = self.update_overlaytext()
@@ -52,16 +54,19 @@ class GEMOverlay(object):
     def steer_callback(self, msg):
         self.steer = round(np.degrees(msg.output),1)
 
+    def ins_callback(self, msg):
+        self.yaw = round(msg.heading, 6)
+
     def gps_callback(self, msg):
         self.lat = round(msg.latitude, 6)
         self.lon = round(msg.longitude, 6)
-        self.yaw = round(msg.azimuth, 6)
-
-        print(self.yaw)
+        
 
     def rtk_callback(self, msg):
-        if msg.extended_solution_status.advance_rtk_verified:
-            self.rtk = "Enabled"
+        if msg.mode == 4:
+            self.rtk = "Enabled Fixed"
+        elif msg.mode == 5:
+            self.rtk = "Enabled Float"
         else:
             self.rtk = "Disabled"
 

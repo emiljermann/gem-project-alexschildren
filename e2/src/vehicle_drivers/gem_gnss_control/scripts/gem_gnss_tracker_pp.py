@@ -33,6 +33,8 @@ import rospy
 # GEM Sensor Headers
 from std_msgs.msg import String, Bool, Float32, Float64
 from novatel_gps_msgs.msg import NovatelPosition, NovatelXYZ, Inspva
+from sensor_msgs.msg import NavSatFix
+from septentrio_gnss_driver.msg import INSNavGeod
 
 # GEM PACMod Headers
 from pacmod_msgs.msg import PositionWithSpeed, PacmodCmd, SystemRptFloat, VehicleSpeedRpt
@@ -48,7 +50,10 @@ class PurePursuit(object):
         self.wheelbase  = 1.75 # meters
         self.offset     = 0.46 # meters
 
-        self.gnss_sub   = rospy.Subscriber("/novatel/inspva", Inspva, self.inspva_callback)
+        self.gnss_sub_old   = rospy.Subscriber("/novatel/inspva", Inspva, self.inspva_callback)
+        # we replaced novatel hardware with septentrio hardware on e2
+        self.gnss_sub   = rospy.Subscriber("/septentrio_gnss/navsatfix", NavSatFix, self.gnss_callback)
+        self.ins_sub    = rospy.Subscriber("/septentrio_gnss/insnavgeod", INSNavGeod, self.ins_callback)
         self.lat        = 0.0
         self.lon        = 0.0
         self.heading    = 0.0
@@ -117,6 +122,14 @@ class PurePursuit(object):
         self.lat     = inspva_msg.latitude  # latitude
         self.lon     = inspva_msg.longitude # longitude
         self.heading = inspva_msg.azimuth   # heading in degrees
+    
+    def ins_callback(self, msg):
+        self.heading = round(msg.heading, 6)
+    
+    def gnss_callback(self, msg):
+        self.lat = round(msg.latitude, 6)
+        self.lon = round(msg.longitude, 6)
+
 
     def speed_callback(self, msg):
         self.speed = round(msg.vehicle_speed, 3) # forward velocity in m/s

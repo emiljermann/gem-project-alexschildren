@@ -32,6 +32,8 @@ import alvinxy.alvinxy as axy
 from ackermann_msgs.msg import AckermannDrive
 from std_msgs.msg import String, Bool, Float32, Float64
 from novatel_gps_msgs.msg import NovatelPosition, NovatelXYZ, Inspva
+from sensor_msgs.msg import NavSatFix
+from septentrio_gnss_driver.msg import INSNavGeod
 from tf.transformations import euler_from_quaternion, quaternion_from_euler
 
 # GEM PACMod Headers
@@ -56,6 +58,9 @@ class Stanley(object):
         self.speed_filter  = OnlineFilter(1.2, 30, 4)
 
         self.gnss_sub   = rospy.Subscriber("/novatel/inspva", Inspva, self.inspva_callback)
+        # we replaced novatel hardware with septentrio hardware on e2
+        self.gnss_sub   = rospy.Subscriber("/septentrio_gnss/navsatfix", NavSatFix, self.gnss_callback)
+        self.ins_sub    = rospy.Subscriber("/septentrio_gnss/insnavgeod", INSNavGeod, self.ins_callback)
         self.lat        = 0.0
         self.lon        = 0.0
         self.heading    = 0.0
@@ -85,6 +90,13 @@ class Stanley(object):
         self.lat     = inspva_msg.latitude  # latitude
         self.lon     = inspva_msg.longitude # longitude
         self.heading = inspva_msg.azimuth   # heading in degrees
+
+    def ins_callback(self, msg):
+        self.heading = round(msg.heading, 6)
+    
+    def gnss_callback(self, msg):
+        self.lat = round(msg.latitude, 6)
+        self.lon = round(msg.longitude, 6)
 
 
     # Get vehicle speed

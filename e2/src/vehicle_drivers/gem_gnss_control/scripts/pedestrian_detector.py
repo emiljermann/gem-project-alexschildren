@@ -28,7 +28,9 @@ import message_filters
 # GEM Sensor Headers
 from sensor_msgs.msg import Image
 from std_msgs.msg import String, Header, Bool, Float32, Float64, Float32MultiArray, Float64MultiArray
-# from novatel_gps_msgs.msg import NovatelPosition, NovatelXYZ, Inspva @TODO: Uncomment
+
+from sensor_msgs.msg import NavSatFix
+from septentrio_gnss_driver.msg import INSNavGeod
 
 # GEM PACMod Headers
 from geometry_msgs.msg import PoseStamped
@@ -119,8 +121,14 @@ class PedestrianDetector:
         self.ts = message_filters.ApproximateTimeSynchronizer([self.sub_rgb_img, self.sub_depth_img], queue_size=2, slop=0.1)
         self.ts.registerCallback(self.img_callback)
 
-        # Subscribe to GNSS data
-        # self.gnss_sub = rospy.Subscriber("/novatel/inspva", Inspva, self.inspva_callback) @TODO: Uncomment
+        # Subscribe to GNSS data (All my homies hate Inspva)
+        self.gnss_sub   = rospy.Subscriber("/septentrio_gnss/navsatfix", NavSatFix)
+        self.ins_sub    = rospy.Subscriber("/septentrio_gnss/insnavgeod", INSNavGeod)
+
+        self.gs = message_filters.ApproximateTimeSynchronizer([self.gnss_sub, self.ins_sub], queue_size=10, slop=0.1)
+        self.gs.registerCallback(self.gnss_callback)
+        
+        
         
         # Publishers for visualization and control
         self.pub_bounding_box = rospy.Publisher("pedestrian_detection/bounding_box", Float32MultiArray, queue_size=1)
@@ -147,11 +155,18 @@ class PedestrianDetector:
     # Pedestrian GNSS Localization
     ###############################################################################
 
-    def inspva_callback(self, inspva_msg):
-        self.lat     = inspva_msg.latitude  # latitude
-        self.lon     = inspva_msg.longitude # longitude
-        self.heading = inspva_msg.azimuth   # heading in degrees
+    def gnss_callback(self, gnss_msg, ins_msg):
+        self.lat     = gnss_msg.latitude  # latitude
+        self.lon     = gnss_msg.longitude # longitude
+        self.heading = ins_msg.heading   # heading in degrees
 
+    def heading_to_yaw(self, heading_curr):
+        if (heading_curr >= 270 and heading_curr < 360):
+            yaw_curr = np.radians(450 - heading_curr)
+        else:
+            yaw_curr = np.radians(90 - heading_curr)
+        return yaw_curr
+    
     def wps_to_local_xy(self, lon_wp, lat_wp):
         # convert GNSS waypoints into local fixed frame reprented in x and y
         lon_wp_x, lat_wp_y = axy.ll2xy(lat_wp, lon_wp, self.olat, self.olon)
@@ -186,7 +201,7 @@ class PedestrianDetector:
         x_gem, y_gem, yaw_gem = self.get_gem_state()
 
         x_ped = x_ped_cam * np.cos(yaw_gem) - y_ped_cam * np.sin(yaw_gem)
-        y_ped = x_ped_cam * np.sin(yaw_gem) + y_ped_cam * np.sin(yaw_gem)
+        y_ped = x_ped_cam * np.sin(yaw_gem) + y_ped_cam * np.cos(yaw_gem)
 
         x_ped += x_gem
         y_ped += y_gem
@@ -195,7 +210,7 @@ class PedestrianDetector:
 
         pedestrian_gnss_msg = Float64MultiArray()
         pedestrian_gnss_msg.data = [lat_ped, lon_ped]
-
+        # @TODO: do we want to use lat lon synchronizer here to do this or just publish local coords and let 
         self.pub_pedestrian_gnss.publish(pedestrian_gnss_msg)
 
     ###############################################################################
@@ -218,6 +233,10 @@ class PedestrianDetector:
             rospy.loginfo(f"Pedestrian within 5m ({pedestrian_distance:.2f} m) – applying hard brake")
             self.pub_speed_command.publish(Float64(0.0))
             self.pub_brake_command.publish(Float64(1.0))  # Max braking
+            
+            # @TODO: Implement stop until keyboard input for now, then give back control (maybe DFA?)
+            
+            
         # else: do nothing, other controllers remain in charge
 
 
@@ -356,7 +375,7 @@ class PedestrianDetector:
                     if mean_depth is not None:
                         self.control_vehicle_for_pedestrian(mean_depth) 
                     
-                    # self.process_pedestrian_gnss(x_cam, z_cam) @TODO: Uncomment 
+                    self.process_pedestrian_gnss(x_cam, z_cam)
                     # print(f"Pedestrian at x: {x_cam:.2f}m, mean depth: {mean_depth:.2f}m")
 
                 else:

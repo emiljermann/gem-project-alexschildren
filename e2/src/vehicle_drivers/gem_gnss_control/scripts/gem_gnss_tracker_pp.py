@@ -74,6 +74,7 @@ class PurePursuit(object):
         self.max_accel     = 0.48 # % of acceleration
         self.pid_speed     = PID(0.5, 0.0, 0.1, wg=20)
         self.speed_filter  = OnlineFilter(1.2, 30, 4)
+        # @TODO: this should work? though per ros docs get_param is for static params
         self.stop_wp_index = rospy.get_param("~stop_waypoint_index", 120)  
         self.stop_dist     = rospy.get_param("~stop_distance_thresh", 1.0)
         self.stopped       = False

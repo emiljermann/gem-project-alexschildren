@@ -236,8 +236,8 @@ class PedestrianDetector:
             self.pub_speed_command.publish(Float64(0.0))
             self.pub_brake_command.publish(Float64(1.0))  # Max braking
 
-            time_to_detect = rospy.Time.now() - self.time_pedestrian_detected
-            rospy.loginfo(f"Time to detect pedestrian: {time_to_detect}")
+            time_to_stop = rospy.Time.now() - self.time_pedestrian_detected
+            rospy.loginfo(f"Time to stop for pedestrian: {time_to_stop}")
             self.time_pedestrian_detected = -1
             
             # @TODO: Implement stop until keyboard input for now, then give back control (maybe DFA?)

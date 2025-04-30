@@ -215,6 +215,26 @@ class PurePursuit(object):
     # computes the Euclidean distance between two 2D points
     def dist(self, p1, p2):
         return round(np.sqrt((p1[0] - p2[0]) ** 2 + (p1[1] - p2[1]) ** 2), 3)
+    
+    def estimate_drive_time_to_stop_point(self):
+        if self.closest_wp_index < 0 or self.stop_wp_index < 0:
+            return float('inf')  # invalid indices
+
+        if self.closest_wp_index >= self.stop_wp_index:
+            return 0.0  # already past or at the stop point
+
+        total_distance = 0.0
+        for i in range(self.closest_wp_index, self.stop_wp_index):
+            x1 = self.path_points_x[i]
+            y1 = self.path_points_y[i]
+            x2 = self.path_points_x[i+1]
+            y2 = self.path_points_y[i+1]
+            total_distance += self.dist((x1, y1), (x2, y2))
+
+        if self.speed <= 0.1:
+            return float('inf')  # avoid divide by zero / unrealistic speed
+
+        return total_distance / self.speed  # estimated time in seconds
 
     def start_pp(self):
         
@@ -264,6 +284,12 @@ class PurePursuit(object):
             # finding the distance of each way point from the current position
             for i in range(len(self.path_points_x)):
                 self.dist_arr[i] = self.dist((self.path_points_x[i], self.path_points_y[i]), (curr_x, curr_y))
+
+            # index of the closest point to current position
+            self.closest_wp_index = int(np.argmin(self.dist_arr))
+            if self.stop_wp_index > 0:
+                estimated_time_to_stop_point = self.estimate_drive_time_to_stop_point()
+                rospy.loginfo(f"Estimated time to stop for pedestrian: {estimated_time_to_stop_point}")
 
             # finding those points which are less than the look ahead distance (will be behind and ahead of the vehicle)
             goal_arr = np.where( (self.dist_arr < self.look_ahead + 0.3) & (self.dist_arr > self.look_ahead - 0.3) )[0]

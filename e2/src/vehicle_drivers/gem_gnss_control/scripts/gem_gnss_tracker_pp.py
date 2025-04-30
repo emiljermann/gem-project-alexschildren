@@ -32,7 +32,6 @@ import rospy
 
 # GEM Sensor Headers
 from std_msgs.msg import String, Bool, Float32, Float64
-from novatel_gps_msgs.msg import NovatelPosition, NovatelXYZ, Inspva
 from sensor_msgs.msg import NavSatFix
 from septentrio_gnss_driver.msg import INSNavGeod
 
@@ -50,7 +49,7 @@ class PurePursuit(object):
         self.wheelbase  = 1.75 # meters
         self.offset     = 0.46 # meters
 
-        self.gnss_sub_old   = rospy.Subscriber("/novatel/inspva", Inspva, self.inspva_callback)
+
         # we replaced novatel hardware with septentrio hardware on e2
         self.gnss_sub   = rospy.Subscriber("/septentrio_gnss/navsatfix", NavSatFix, self.gnss_callback)
         self.ins_sub    = rospy.Subscriber("/septentrio_gnss/insnavgeod", INSNavGeod, self.ins_callback)
@@ -65,6 +64,8 @@ class PurePursuit(object):
 
         self.olat       = 40.0928563
         self.olon       = -88.2359994
+
+        self.sub_pedestrian_state = rospy.Subscriber("pedestrian_detector/state", String, self.state_callback)
 
         # read waypoints into the system 
         self.goal       = 0            
@@ -119,11 +120,6 @@ class PurePursuit(object):
         self.steer_cmd.angular_velocity_limit = 2.0 # radians/second
 
 
-    def inspva_callback(self, inspva_msg):
-        self.lat     = inspva_msg.latitude  # latitude
-        self.lon     = inspva_msg.longitude # longitude
-        self.heading = inspva_msg.azimuth   # heading in degrees
-    
     def ins_callback(self, msg):
         self.heading = round(msg.heading, 6)
     
@@ -131,6 +127,8 @@ class PurePursuit(object):
         self.lat = round(msg.latitude, 6)
         self.lon = round(msg.longitude, 6)
 
+    def state_callback(self, msg):
+        self.pedestrian_state = msg.data
 
     def speed_callback(self, msg):
         self.speed = round(msg.vehicle_speed, 3) # forward velocity in m/s
@@ -242,39 +240,59 @@ class PurePursuit(object):
 
             if (self.gem_enable == False):
 
-                if(self.pacmod_enable == True):
+                if (self.pacmod_enable == True):
+                        # ---------- enable PACMod ----------
 
-                    # ---------- enable PACMod ----------
+                        # enable forward gear
+                        self.gear_cmd.ui16_cmd = 3
 
-                    # enable forward gear
-                    self.gear_cmd.ui16_cmd = 3
+                        # enable brake
+                        self.brake_cmd.enable  = True
+                        self.brake_cmd.clear   = False
+                        self.brake_cmd.ignore  = False
+                        self.brake_cmd.f64_cmd = 0.0
 
-                    # enable brake
-                    self.brake_cmd.enable  = True
-                    self.brake_cmd.clear   = False
-                    self.brake_cmd.ignore  = False
-                    self.brake_cmd.f64_cmd = 0.0
+                        # enable gas 
+                        self.accel_cmd.enable  = True
+                        self.accel_cmd.clear   = False
+                        self.accel_cmd.ignore  = False
+                        self.accel_cmd.f64_cmd = 0.0
 
-                    # enable gas 
-                    self.accel_cmd.enable  = True
-                    self.accel_cmd.clear   = False
-                    self.accel_cmd.ignore  = False
-                    self.accel_cmd.f64_cmd = 0.0
+                        self.gear_pub.publish(self.gear_cmd)
+                        print("PP Foward Engaged!")
 
-                    self.gear_pub.publish(self.gear_cmd)
-                    print("Foward Engaged!")
+                        self.turn_pub.publish(self.turn_cmd)
+                        print("PP Turn Signal Ready!")
+                        
+                        self.brake_pub.publish(self.brake_cmd)
+                        print("PP Brake Engaged!")
 
-                    self.turn_pub.publish(self.turn_cmd)
-                    print("Turn Signal Ready!")
-                    
-                    self.brake_pub.publish(self.brake_cmd)
-                    print("Brake Engaged!")
+                        self.accel_pub.publish(self.accel_cmd)
+                        print("PP Gas Engaged!")
 
-                    self.accel_pub.publish(self.accel_cmd)
-                    print("Gas Engaged!")
-
-                    self.gem_enable = True
-
+                        self.gem_enable = True
+            
+            # State tracking, ignores command if state is PICKING_UP
+            if (self.pedestrian_state == "SEARCHING" and self.gem_enable):
+                # ---------- dont ignore PACMod ----------
+                # dont ignore brake
+                self.brake_cmd.ignore  = True
+                # dont ignore gas 
+                self.accel_cmd.ignore  = True
+                self.brake_pub.publish(self.brake_cmd)
+                print("PP Brake Not Ignored!")
+                self.accel_pub.publish(self.accel_cmd)
+                print("PP Gas Ignored!")
+            elif (self.pedestrian_state == "PICKING_UP"):
+                # ---------- ignore PACMod ----------
+                # ignore brake
+                self.brake_cmd.ignore  = True
+                # ignore gas 
+                self.accel_cmd.ignore  = True
+                self.brake_pub.publish(self.brake_cmd)
+                print("PP Brake Ignored!")
+                self.accel_pub.publish(self.accel_cmd)
+                print("PP Gas Ignored!")
 
             self.path_points_x = np.array(self.path_points_lon_x)
             self.path_points_y = np.array(self.path_points_lat_y)
@@ -304,18 +322,20 @@ class PurePursuit(object):
                     self.goal = idx
                     break
 
-            # finding the distance between the goal point and the vehicle
-            # true look-ahead distance between a waypoint and current position
-            L = self.dist_arr[self.goal]
+            # # finding the distance between the goal point and the vehicle
+            # # true look-ahead distance between a waypoint and current position
+            # L = self.dist_arr[self.goal]
             
-            if (not self.stopped and self.stop_wp_index >= 0 and self.goal >= self.stop_wp_index and L <= self.stop_dist):                 
-                rospy.loginfo("Reached stop waypoint %d  (d=%.2fm) - braking", self.stop_wp_index, L)
-                self._apply_brakes()
-                self.stopped = True
+            # if (not self.stopped and self.stop_wp_index >= 0 and self.goal >= self.stop_wp_index and L <= self.stop_dist):                 
+            #     rospy.loginfo("Reached stop waypoint %d  (d=%.2fm) - braking", self.stop_wp_index, L)
+            #     self._apply_brakes()
+            #     self.stopped = True
 
-            if self.stopped:
-                self.rate.sleep()
-                continue
+            # if self.stopped:
+            #     self.rate.sleep()
+            #     continue
+
+            
 
             
             # find the curvature and the angle 

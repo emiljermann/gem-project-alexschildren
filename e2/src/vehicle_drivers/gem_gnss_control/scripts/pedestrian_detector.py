@@ -34,6 +34,7 @@ from septentrio_gnss_driver.msg import INSNavGeod
 
 # GEM PACMod Headers
 from geometry_msgs.msg import PoseStamped
+from pacmod_msgs.msg import PositionWithSpeed, PacmodCmd, SystemRptFloat, VehicleSpeedRpt
 
 
 ###############################################################################
@@ -127,6 +128,9 @@ class PedestrianDetector:
         self.gnss_sub   = rospy.Subscriber("/septentrio_gnss/navsatfix", NavSatFix)
         self.ins_sub    = rospy.Subscriber("/septentrio_gnss/insnavgeod", INSNavGeod)
 
+        # Gets pacmod enable 
+        self.enable_sub = rospy.Subscriber("/pacmod/as_tx/enable", Bool, self.enable_callback)
+
         self.gs = message_filters.ApproximateTimeSynchronizer([self.gnss_sub, self.ins_sub], queue_size=10, slop=0.1)
         self.gs.registerCallback(self.gnss_callback)
         
@@ -137,6 +141,7 @@ class PedestrianDetector:
         self.pub_rgb_pedestrian_image = rospy.Publisher("pedestrian_detection/rgb/pedestrian_image", Image, queue_size=1)
         self.pub_depth = rospy.Publisher("pedestrian_detection/avg_depth", Float32MultiArray, queue_size=1)
         self.pub_pedestrian_gnss = rospy.Publisher("pedestrian_detector/gnss", Float64MultiArray)
+        self.pub_pedestrian_state = rospy.Publisher("pedestrian_detector/state", String, queue_size = 1)
 
 
         # ###############################################################################
@@ -150,6 +155,20 @@ class PedestrianDetector:
         # self.is_slowing_for_pedestrian = False
         # self.min_stop_duration = 3.0  # seconds
         # self.stop_timer = None
+
+        # GEM vehilce brake control
+        self.brake_pub = rospy.Publisher('/pacmod/as_rx/brake_cmd', PacmodCmd, queue_size=1)
+        self.brake_cmd = PacmodCmd()
+        self.brake_cmd.enable = False
+        self.brake_cmd.clear  = True
+        self.brake_cmd.ignore = True
+
+        # GEM vechile forward motion control
+        self.accel_pub = rospy.Publisher('/pacmod/as_rx/accel_cmd', PacmodCmd, queue_size=1)
+        self.accel_cmd = PacmodCmd()
+        self.accel_cmd.enable = False
+        self.accel_cmd.clear  = True
+        self.accel_cmd.ignore = True
 
         self.last_save_time = rospy.Time.now()
 
@@ -194,6 +213,9 @@ class PedestrianDetector:
     def local_xy_to_wps(self, local_x, local_y):
         lat, lon = axy.xy2ll(local_x, local_y, self.olat, self.olon)
         return lat, lon
+    
+    def enable_callback(self, msg):
+        self.pacmod_enable = msg.data
 
     def process_pedestrian_gnss(self, x_ped_cam, y_ped_cam):
         if not self.lon or not self.lat:
@@ -229,16 +251,39 @@ class PedestrianDetector:
         # Only act when we have a valid measurement
         if pedestrian_distance is None or not np.isfinite(pedestrian_distance):
             return
+        
+        if self.pacmod_enable:
+            # enable brake
+            self.brake_cmd.enable  = True
+            self.brake_cmd.clear   = False
+            self.brake_cmd.ignore  = False
+            self.brake_cmd.f64_cmd = 0.0
+
+            # enable gas 
+            self.accel_cmd.enable  = True
+            self.accel_cmd.clear   = False
+            self.accel_cmd.ignore  = False
+            self.accel_cmd.f64_cmd = 0.0
 
         # Hard brake if within 5 m
         if pedestrian_distance <= 5.0:
             rospy.loginfo(f"Pedestrian within 5m ({pedestrian_distance:.2f} m) – applying hard brake")
-            self.pub_speed_command.publish(Float64(0.0))
-            self.pub_brake_command.publish(Float64(1.0))  # Max braking
 
             time_to_stop = rospy.Time.now() - self.time_pedestrian_detected
             rospy.loginfo(f"Time to stop for pedestrian: {time_to_stop}")
             self.time_pedestrian_detected = -1
+
+            pedestrian_brake_state = "PICKING_UP"
+            self.pub_pedestrian_state.publish(String(data = pedestrian_brake_state))
+            
+            self.brake_cmd.f64_cmd = 1.0 # Max braking
+            self.accel_cmd.f64_cmd = 0.0
+
+            self.pub_speed_command.publish(self.accel_cmd)
+            self.pub_brake_command.publish(self.brake_cmd)  
+        else:
+            pedestrian_brake_state = "SEARCHING"
+            self.pub_pedestrian_state.publish(String(data = pedestrian_brake_state))
             
             # @TODO: Implement stop until keyboard input for now, then give back control (maybe DFA?)
             

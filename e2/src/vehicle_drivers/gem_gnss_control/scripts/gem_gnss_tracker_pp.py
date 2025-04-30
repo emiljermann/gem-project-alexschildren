@@ -127,15 +127,18 @@ class PurePursuit(object):
         self.path_plot, = self.ax.plot([], [], 'k--', label='Path')
         self.curr_pos_plot, = self.ax.plot([], [], 'bo', label='Current Position')
         self.goal_plot, = self.ax.plot([], [], 'ro', label='Goal Point')
+        self.heading_arrows, = self.ax.quiver([], [], [], [], angles='xy', scale_units='xy', scale=1, color='g')
         self.ax.set_xlabel("X (m)")
         self.ax.set_ylabel("Y (m)")
         self.ax.set_title("Pure Pursuit Live Map")
         self.ax.legend()
     
-    def update_plot(self, curr_x, curr_y, goal_x, goal_y):
+    def update_plot(self, curr_x, curr_y, curr_h, goal_x, goal_y, goal_h):
         self.path_plot.set_data(self.path_points_x, self.path_points_y)
         self.curr_pos_plot.set_data([curr_x], [curr_y])
         self.goal_plot.set_data([goal_x], [goal_y])
+        self.heading_arrows.set_UVC([curr_x+2*np.cos(curr_h), goal_x+2*np.cos(goal_h)], [curr_y+2*np.sin(curr_h), goal_y+2*np.sin(goal_h)])
+        self.heading_arrows.set_offsets(np.array([[curr_x, curr_y], [goal_x, goal_y]]))
         self.ax.set_xlim(curr_x - 10, curr_x + 10)
         self.ax.set_ylim(curr_y - 10, curr_y + 10)
         self.fig.canvas.draw()
@@ -340,7 +343,7 @@ class PurePursuit(object):
                 v2 = [np.cos(curr_yaw), np.sin(curr_yaw)]
                 temp_angle = self.find_angle(v1,v2)
                 # find correct look-ahead point by using heading information
-                if abs(temp_angle) < np.pi/2:
+                if abs(curr_yaw-self.path_points_heading[idx]) < np.pi/2:
                     self.goal = idx
                     break
 
@@ -378,7 +381,7 @@ class PurePursuit(object):
 
             
             # find the curvature and the angle 
-            alpha = self.heading_to_yaw(self.path_points_heading[self.goal]) - curr_yaw
+            alpha = self.path_points_heading[self.goal] - curr_yaw
 
             # ----------------- tuning this part as needed -----------------
             k       = 0.41 
@@ -427,7 +430,8 @@ class PurePursuit(object):
 
             goal_x = self.path_points_x[self.goal]
             goal_y = self.path_points_y[self.goal]
-            self.update_plot(curr_x, curr_y, goal_x, goal_y)
+            goal_heading = self.heading_to_yaw(self.path_points_heading[self.goal])
+            self.update_plot(curr_x, curr_y, curr_yaw, goal_x, goal_y, goal_heading)
 
             self.rate.sleep()
 

@@ -109,6 +109,8 @@ class PedestrianDetector:
 
         self.lon = None
         self.lat = None
+
+        self.time_pedestrian_detected = -1
         
         ###############################################################################
         # ROS Communication Setup
@@ -233,6 +235,10 @@ class PedestrianDetector:
             rospy.loginfo(f"Pedestrian within 5m ({pedestrian_distance:.2f} m) – applying hard brake")
             self.pub_speed_command.publish(Float64(0.0))
             self.pub_brake_command.publish(Float64(1.0))  # Max braking
+
+            time_to_detect = rospy.Time.now() - self.time_pedestrian_detected
+            rospy.loginfo(f"Time to detect pedestrian: {time_to_detect}")
+            self.time_pedestrian_detected = -1
             
             # @TODO: Implement stop until keyboard input for now, then give back control (maybe DFA?)
             
@@ -311,6 +317,8 @@ class PedestrianDetector:
                 boxes = (obj.xmin, obj.ymin, obj.xmax, obj.ymax)
                 confidence = obj.confidence
                 if confidence > highest_conf:
+                    if self.time_pedestrian_detected == -1:
+                        self.time_pedestrian_detected = rospy.Time.now()
                     highest_conf = confidence
                     box_coords = boxes
                     highest_conf = confidence

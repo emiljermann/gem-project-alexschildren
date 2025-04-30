@@ -299,6 +299,21 @@ class PurePursuit(object):
             self.path_points_y = np.array(self.path_points_lat_y)
 
             curr_x, curr_y, curr_yaw = self.get_gem_state()
+            # === DEBUG BLOCK START ===
+            rospy.loginfo("----- GNSS / INS Debug -----")
+            rospy.loginfo(f"Raw GNSS lat: {self.lat}, lon: {self.lon}")
+            rospy.loginfo(f"INS heading (degrees): {self.heading}")
+            rospy.loginfo(f"Converted yaw (radians): {curr_yaw}")
+            rospy.loginfo(f"Local vehicle position x: {curr_x}, y: {curr_y}")
+            rospy.loginfo(f"Closest waypoint index: {self.closest_wp_index}")
+            if 0 <= self.closest_wp_index < self.wp_size:
+                wp_x = self.path_points_x[self.closest_wp_index]
+                wp_y = self.path_points_y[self.closest_wp_index]
+                rospy.loginfo(f"Waypoint at index: ({wp_x}, {wp_y})")
+                rospy.loginfo(f"Distance to waypoint: {self.dist((wp_x, wp_y), (curr_x, curr_y))} m")
+            else:
+                rospy.logwarn("Closest waypoint index out of bounds!")
+            # === DEBUG BLOCK END ===
 
             # finding the distance of each way point from the current position
             for i in range(len(self.path_points_x)):

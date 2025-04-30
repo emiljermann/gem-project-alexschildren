@@ -230,9 +230,9 @@ class PurePursuit(object):
             total_distance += self.dist((x1, y1), (x2, y2))
 
         if self.speed <= 0.1:
-            return float('inf')  # avoid divide by zero / unrealistic speed
-
-        return total_distance / self.speed  # estimated time in seconds
+            return total_distance / 0.1  # avoid divide by zero / unrealistic speed
+        else:
+            return total_distance / self.speed  # estimated time in seconds
 
     def start_pp(self):
         

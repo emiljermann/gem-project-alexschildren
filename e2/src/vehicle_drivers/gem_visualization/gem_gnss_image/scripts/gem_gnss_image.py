@@ -76,6 +76,9 @@ class GNSSImage(object):
         self.img_width    = 2107
         self.img_height   = 1313
 
+        self.pedestrian_lat = None
+        self.pedestrian_lon = None
+
 
     def gps_callback(self, msg):
         self.lat     = msg.latitude

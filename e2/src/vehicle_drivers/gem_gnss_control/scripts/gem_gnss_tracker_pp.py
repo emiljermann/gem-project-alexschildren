@@ -27,7 +27,7 @@ from pid_controllers import PID
 
 
 # ROS Headers
-import alvinxy.alvinxy as axy # Import AlvinXY transformation module
+import alvinxy as axy # Import AlvinXY transformation module
 import rospy
 
 # GEM Sensor Headers
@@ -65,6 +65,7 @@ class PurePursuit(object):
         self.olat       = 40.0928563
         self.olon       = -88.2359994
 
+        self.pedestrian_state = None
         self.sub_pedestrian_state = rospy.Subscriber("pedestrian_detector/state", String, self.state_callback)
 
         # read waypoints into the system 
@@ -171,7 +172,7 @@ class PurePursuit(object):
     def read_waypoints(self):
         # read recorded GPS lat, lon, heading
         dirname  = os.path.dirname(__file__)
-        filename = os.path.join(dirname, '../waypoints/xyhead_demo_pp.csv')
+        filename = os.path.join(dirname, '../waypoints/test1waypoints.csv')
         with open(filename) as f:
             path_points = [tuple(line) for line in csv.reader(f)]
         # x towards East and y towards North
@@ -324,7 +325,7 @@ class PurePursuit(object):
 
             # # finding the distance between the goal point and the vehicle
             # # true look-ahead distance between a waypoint and current position
-            # L = self.dist_arr[self.goal]
+            L = self.dist_arr[self.goal]
             
             # if (not self.stopped and self.stop_wp_index >= 0 and self.goal >= self.stop_wp_index and L <= self.stop_dist):                 
             #     rospy.loginfo("Reached stop waypoint %d  (d=%.2fm) - braking", self.stop_wp_index, L)

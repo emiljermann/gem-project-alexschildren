@@ -6,15 +6,15 @@ import time
 import torch
 import numpy as np
 from numpy import linalg as la
-import alvinxy.alvinxy as axy
+import alvinxy as axy
 
 
-# created using `rosbag echo /septentrio_gnss/insnavgeod -b <bag_file> > <output_file>`
-gnss_input_filename = "dev_utils/coord_extraction/gnss_demo_path.txt" 
 # created using `rosbag echo /septentrio_gnss/navsatfix -b <bag_file> > <output_file>`
+gnss_input_filename = "dev_utils/coord_extraction/gnss_demo_path.txt" 
+# created using `rosbag echo /septentrio_gnss/insnavgeod -b <bag_file> > <output_file>`
 ins_input_filename = "dev_utils/coord_extraction/ins_demo_path.txt" 
 
-output_filename   = "e2/src/vehicles_drivers/gem_gnss_control/waypoints/xyhead_custom_pp.csv"
+output_filename   = "e2/src/vehicle_drivers/gem_gnss_control/waypoints/xyhead_custom_pp.csv"
 
 # given constants from pedestrian detector (used to create waypoints in a cartesian frame at origin olat,olon)
 offset     = 0.46 # meters
@@ -61,25 +61,27 @@ def get_waypoints(gnss_filename, ins_filename):
         i = 0
         while i < len(lines):
             line1 = lines[i].strip()
-            if line1.startswith("heading"): 
-                    ins_points.append(float(line1[7:]))
+            if line1.startswith("heading:"): 
+                    ins_points.append(float(line1[8:]))
             i += 1
     
     gnss_points = np.array(gnss_points)
-    ins_points = np.array(ins_points)
-    waypoints = np.hstack((gnss_points, ins_points), axis=1)
+    ins_points = np.array(ins_points)[:gnss_points.shape[0]]
+    print(gnss_points.shape, ins_points.shape)
+    waypoints = np.hstack((gnss_points, ins_points.reshape(-1,1)))
     
     waypoints = np.array([get_gem_state(lat, lon, heading) for (lat, lon, heading) in waypoints])
-    return waypoints
+    #20 appears to match sampling rate of given files, can be changed
+    return waypoints[::7]
     
 def write_to_file(filename, waypoints):
     with open(filename,"w") as f:
         for (cx,cy, yaw) in waypoints:
             f.write(f"{cx},{cy},{yaw}\n")
             
-if __name__ == "__main__":
-    
+def main():
     waypoints = get_waypoints(gnss_input_filename, ins_input_filename)
     write_to_file(output_filename, waypoints)
+    print(f"Wrote {waypoints.shape[0]} waypoints to {output_filename}")
         
         

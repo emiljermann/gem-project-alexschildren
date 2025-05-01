@@ -40,86 +40,75 @@ class Printer:
         self.bridge = CvBridge()  # Converts between ROS Image messages and OpenCV images
 
         # Rostopic Subscriptions
-        # self.sub_pedestrian_bounding_box = rospy.Subscriber("pedestrian_detection/bounding_box", Float32MultiArray, queue_size=1)
-        # self.sub_rgb_pedestrian_image = rospy.Subscriber("pedestrian_detection/rgb/pedestrian_image", Image, self.printer, queue_size=1)
-        self.sub_rgb_img = rospy.Subscriber('/zed2/zed_node/rgb/image_rect_color', Image, self.yolo_callback, queue_size = 1)
+        self.sub_rgb_pedestrian_image = rospy.Subscriber("pedestrian_detection/rgb/pedestrian_image", Image, self.printer, queue_size=1)
+        self.sub_pedestrian_state = rospy.Subscriber("pedestrian_detection/state", String, self.state_callback)
+        self.sub_pickup_time = rospy.Subscriber('pedestrian_detector/pickup_time', Float32, self.pickup_time_callback)
 
-        self.time_stamp = list()
+       
+        self.pedestrian_state = "UNINITIALIZED"
+        self.estimated_pickup_time = float('inf')
+
+        self.frame_count = 0
+        self.save_images = True  # Toggle for saving
+        self.image_dir = "saved_images"
+        os.makedirs(self.image_dir, exist_ok=True)
+
+        # Optional: Store frames for video export
+        self.video_frames = []
+        self.store_video = True
     
+    def state_callback(self, msg):
+        self.pedestrian_state = msg.data
+    
+    def pickup_time_callback(self, msg):
+        self.estimated_pickup_time = msg.data
+
     def printer(self, ros_img):
         try:
-            # Show the image
             img = self.bridge.imgmsg_to_cv2(ros_img, "bgr8")
 
-            # Show the image
-            cv2.imshow("Pedestrian Detection", img)
-            cv2.waitKey(1)  # 1 ms wait so it updates the window without blocking
+            font = cv2.FONT_HERSHEY_SIMPLEX
+            font_scale = 0.6
+            color = (0, 255, 0)
+            thickness = 2
 
-        except CvBridgeError as e:
-            print(e)
+            state_text = f"State: {self.pedestrian_state}"
+            time_text = f"Pickup Time: {self.estimated_pickup_time:.2f}s"
 
-    def get_pedestrian_box(self, model, frame):
-        """
-        Gets pose points from a given YOLO model and image frame.
-        Returns:
-            bounding_box: bounding box of person with highest confidence, None otherwise
-                          in format (top-left-x, top-left-y, bottom-right-x, bottom-right-y)
-            confidence: confidence score that said pedestrian exists
-        """
-        with torch.no_grad():
-            t = time.time()
-            result = model(frame).pandas().xyxy[0]
-            self.time_stamp.append(time.time() - t)
-            if len(self.time_stamp) == 1000:
-                print(f"Average Model Time: {np.mean(self.time_stamp)}")
-                # Average Model Time: 0.0124795982837677 [YoloV5S]
-                # Average Model Time: 0.011895380735397339 [YoloV5n]
+            cv2.putText(img, state_text, (10, 30), font, font_scale, color, thickness)
+            cv2.putText(img, time_text, (10, 60), font, font_scale, color, thickness)
 
+            # # Display the image
+            # cv2.imshow("Pedestrian Detection", img)
+            # cv2.waitKey(1)
 
-        if len(result) == 0:
-            return None, 0
-        
-        all_box_coords = []
-        all_confs = []
-
-        box_coords = None
-        highest_conf = 0
-        for obj in result.itertuples():
-            if obj.name == "person":
-                box = (obj.xmin, obj.ymin, obj.xmax, obj.ymax)
-                confidence = obj.confidence
-                if confidence > 0.7:
-                    all_box_coords.append(box)
-                    all_confs.append(confidence)
-
-        return all_box_coords, all_confs 
-    
-    def yolo_callback(self, ros_img):
-        try:
-            img = self.bridge.imgmsg_to_cv2(ros_img, "bgr8")
-            all_box_coords, all_confs = self.get_pedestrian_box(self.pedestrian_model, img)
-
-            # No img was found
-            if all_box_coords is None:
-                return
-            for i, box in enumerate(all_box_coords):
-                confidence = all_confs[i]
-
-                x1, y1, x2, y2 = box
-                x1 = int(x1)
-                x2 = int(x2)
-                y1 = int(y1)
-                y2 = int(y2)
-
-                cv2.rectangle(img, (x1, y1), (x2, y2), (0, 255, 0), 2)
-                cv2.putText(img, f"{confidence:.2f}", (x1, y1 - 10),
-                            cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 2)
+            # Save image if enabled
+            if self.save_images:
+                img_path = os.path.join(self.image_dir, f"frame_{self.frame_count:05d}.jpg")
+                cv2.imwrite(img_path, img)
             
-            cv2.imshow("Image with Boxes", img)
-            cv2.waitKey(1)
+            # Store for video
+            if self.store_video:
+                self.video_frames.append(img.copy())
+
+            self.frame_count += 1
+
         except CvBridgeError as e:
             print(e)
 
+    def save_video(self, filename="output_video.avi", fps=10):
+        if not self.video_frames:
+            print("No frames to save.")
+            return
+
+        height, width, _ = self.video_frames[0].shape
+        out = cv2.VideoWriter(filename, cv2.VideoWriter_fourcc(*'XVID'), fps, (width, height))
+
+        for frame in self.video_frames:
+            out.write(frame)
+
+        out.release()
+        print(f"Saved video to {filename}")
 
 
 ###############################################################################
@@ -128,10 +117,10 @@ class Printer:
 
 if __name__ == "__main__":
     try:
-        # Create detector instance
         printer = Printer()
-        
-        # Keep node running until shutdown
-        rate = rospy.spin() #r ospy.Rate(10)  # 10 Hz control loop
+        rospy.spin()
     except rospy.ROSInterruptException:
         pass
+    finally:
+        printer.save_video()  # Save video on shutdown
+        cv2.destroyAllWindows()

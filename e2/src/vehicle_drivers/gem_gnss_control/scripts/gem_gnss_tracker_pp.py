@@ -120,6 +120,9 @@ class PurePursuit(object):
         self.steer_cmd.angular_position = 0.0 # radians, -: clockwise, +: counter-clockwise
         self.steer_cmd.angular_velocity_limit = 2.0 # radians/second
 
+        # Pedestrian pickup time subscriber
+        self.pub_pickup_time = rospy.Publisher('pedestrian_detector/pickup_time', Float32, queue_size = 1)
+
 
     def ins_callback(self, msg):
         self.heading = round(msg.heading, 6)
@@ -280,6 +283,7 @@ class PurePursuit(object):
                 self.brake_cmd.ignore  = True
                 # dont ignore gas 
                 self.accel_cmd.ignore  = True
+
                 self.brake_pub.publish(self.brake_cmd)
                 print("PP Brake Not Ignored!")
                 self.accel_pub.publish(self.accel_cmd)
@@ -290,6 +294,7 @@ class PurePursuit(object):
                 self.brake_cmd.ignore  = True
                 # ignore gas 
                 self.accel_cmd.ignore  = True
+
                 self.brake_pub.publish(self.brake_cmd)
                 print("PP Brake Ignored!")
                 self.accel_pub.publish(self.accel_cmd)
@@ -309,6 +314,7 @@ class PurePursuit(object):
             if self.stop_wp_index > 0:
                 estimated_time_to_stop_point = self.estimate_drive_time_to_stop_point()
                 rospy.loginfo(f"Estimated time to stop for pedestrian: {estimated_time_to_stop_point}")
+                self.pub_pickup_time.publish(Float32(estimated_time_to_stop_point))
 
             # finding those points which are less than the look ahead distance (will be behind and ahead of the vehicle)
             goal_arr = np.where( (self.dist_arr < self.look_ahead + 0.3) & (self.dist_arr > self.look_ahead - 0.3) )[0]

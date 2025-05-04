@@ -381,8 +381,17 @@ class PurePursuit(object):
 
             
             # find the curvature and the angle 
-            alpha = self.path_points_heading[self.goal] - curr_yaw
+            # w is the amount we prioritize the distance to goal heading over matching goal x, y
+            w = 0.2
+            
+            alpha_heading = self.path_points_heading[self.goal] - curr_yaw
+            
+            dx = self.path_points_x[self.goal] - curr_x
+            dy = self.path_points_y[self.goal] - curr_y
+            alpha_vector = math.atan2(dy, dx) - curr_yaw
+            alpha_vector = math.atan2(math.sin(alpha), math.cos(alpha))
 
+            alpha = alpha_heading * w + alpha_vector * (1-w)
             # ----------------- tuning this part as needed -----------------
             k       = 0.41 
             angle_i = math.atan((k * 2 * self.wheelbase * math.sin(alpha)) / L) 

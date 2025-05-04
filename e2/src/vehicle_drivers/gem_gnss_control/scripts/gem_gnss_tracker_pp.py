@@ -21,6 +21,7 @@ import math
 import numpy as np
 from numpy import linalg as la
 import scipy.signal as signal
+import matplotlib.pyplot as plt
 
 from filters import OnlineFilter
 from pid_controllers import PID
@@ -123,6 +124,29 @@ class PurePursuit(object):
         # Pedestrian pickup time subscriber
         self.pub_pickup_time = rospy.Publisher('pedestrian_detector/pickup_time', Float32, queue_size = 1)
 
+        # OUR LOCATION V.S. GOAL POINT ON PURE PURSUIT POINT MAP
+        plt.ion()
+        self.fig, self.ax = plt.subplots()
+        self.path_plot, = self.ax.plot([], [], 'k--', label='Path')
+        self.curr_pos_plot, = self.ax.plot([], [], 'bo', label='Current Position')
+        self.goal_plot, = self.ax.plot([], [], 'ro', label='Goal Point')
+        self.heading_arrows = self.ax.quiver([0,0], [0,0], [0,0], [0,0], angles='xy', scale_units='xy', scale=1, color='g')
+        self.ax.set_xlabel("X (m)")
+        self.ax.set_ylabel("Y (m)")
+        self.ax.set_title("Pure Pursuit Live Map")
+        self.ax.legend()
+    
+    def update_plot(self, curr_x, curr_y, curr_h, goal_x, goal_y, goal_h):
+        arrow_len = 2
+        self.path_plot.set_data(self.path_points_x, self.path_points_y)
+        self.curr_pos_plot.set_data([curr_x], [curr_y])
+        self.goal_plot.set_data([goal_x], [goal_y])
+        self.heading_arrows.set_UVC([arrow_len*np.cos(curr_h), arrow_len*np.cos(goal_h)], [arrow_len*np.sin(curr_h), arrow_len*np.sin(goal_h)])
+        self.heading_arrows.set_offsets(np.array([[curr_x, curr_y], [goal_x, goal_y]]))
+        self.ax.set_xlim(curr_x - 10, curr_x + 10)
+        self.ax.set_ylim(curr_y - 10, curr_y + 10)
+        self.fig.canvas.draw()
+        self.fig.canvas.flush_events()
 
     def ins_callback(self, msg):
         self.heading = round(msg.heading, 6)
@@ -175,7 +199,7 @@ class PurePursuit(object):
     def read_waypoints(self):
         # read recorded GPS lat, lon, heading
         dirname  = os.path.dirname(__file__)
-        filename = os.path.join(dirname, '../waypoints/test1waypoints.csv')
+        filename = os.path.join(dirname, '../waypoints/test2waypoints.csv')
         with open(filename) as f:
             path_points = [tuple(line) for line in csv.reader(f)]
         # x towards East and y towards North
@@ -304,6 +328,7 @@ class PurePursuit(object):
             self.path_points_y = np.array(self.path_points_lat_y)
 
             curr_x, curr_y, curr_yaw = self.get_gem_state()
+            
 
             # finding the distance of each way point from the current position
             for i in range(len(self.path_points_x)):
@@ -325,9 +350,31 @@ class PurePursuit(object):
                 v2 = [np.cos(curr_yaw), np.sin(curr_yaw)]
                 temp_angle = self.find_angle(v1,v2)
                 # find correct look-ahead point by using heading information
-                if abs(temp_angle) < np.pi/2:
-                    self.goal = idx
-                    break
+                if abs(curr_yaw-self.path_points_heading[idx]) < np.pi/2:
+                    # make sure the look-ahead point is in front of the vehicle
+                    dx = self.path_points_x[idx] - curr_x
+                    dy = self.path_points_y[idx] - curr_y
+                    alpha_vector = math.atan2(dy, dx) - curr_yaw
+                    alpha_vector = math.atan2(math.sin(alpha_vector), math.cos(alpha_vector))
+                    if abs(alpha_vector) < np.pi/2:
+                        self.goal = idx
+
+            # === DEBUG BLOCK START ===
+            rospy.loginfo("----- GNSS / INS Debug -----")
+            rospy.loginfo(f"Raw GNSS lat: {self.lat}, lon: {self.lon}")
+            rospy.loginfo(f"INS heading (degrees): {self.heading}")
+            rospy.loginfo(f"Converted yaw (radians): {curr_yaw}")
+            rospy.loginfo(f"Local vehicle position x: {curr_x}, y: {curr_y}")
+            rospy.loginfo(f"Goal index: {self.goal}")
+            if 0 <= self.goal < self.wp_size:
+                wp_x = self.path_points_x[self.goal]
+                wp_y = self.path_points_y[self.goal]
+                wp_heading = self.path_points_heading[self.goal]
+                rospy.loginfo(f"Waypoint at index: ({wp_x}, {wp_y}), heading: {wp_heading}")
+                rospy.loginfo(f"Distance to waypoint: {self.dist((wp_x, wp_y), (curr_x, curr_y))} m")
+            else:
+                rospy.logwarn("Closest waypoint index out of bounds!")
+            # === DEBUG BLOCK END ===
 
             # # finding the distance between the goal point and the vehicle
             # # true look-ahead distance between a waypoint and current position
@@ -346,8 +393,17 @@ class PurePursuit(object):
 
             
             # find the curvature and the angle 
-            alpha = self.heading_to_yaw(self.path_points_heading[self.goal]) - curr_yaw
+            # w is the amount we prioritize the distance to goal heading over matching goal x, y
+            w = 0.2
+            
+            alpha_heading = self.path_points_heading[self.goal] - curr_yaw
+            
+            dx = self.path_points_x[self.goal] - curr_x
+            dy = self.path_points_y[self.goal] - curr_y
+            alpha_vector = math.atan2(dy, dx) - curr_yaw
+            alpha_vector = math.atan2(math.sin(alpha_vector), math.cos(alpha_vector))
 
+            alpha = alpha_heading * w + alpha_vector * (1-w)
             # ----------------- tuning this part as needed -----------------
             k       = 0.41 
             angle_i = math.atan((k * 2 * self.wheelbase * math.sin(alpha)) / L) 
@@ -392,6 +448,11 @@ class PurePursuit(object):
             self.accel_pub.publish(self.accel_cmd)
             self.steer_pub.publish(self.steer_cmd)
             self.turn_pub.publish(self.turn_cmd)
+
+            goal_x = self.path_points_x[self.goal]
+            goal_y = self.path_points_y[self.goal]
+            goal_heading = self.path_points_heading[self.goal]
+            self.update_plot(curr_x, curr_y, curr_yaw, goal_x, goal_y, goal_heading)
 
             self.rate.sleep()
 

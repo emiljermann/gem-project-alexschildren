@@ -45,7 +45,7 @@ class PurePursuit(object):
 
         self.rate       = rospy.Rate(10)
 
-        self.look_ahead = 4
+        self.look_ahead = 3.5
         self.wheelbase  = 1.75 # meters
         self.offset     = 0.46 # meters
 
@@ -175,7 +175,7 @@ class PurePursuit(object):
     def read_waypoints(self):
         # read recorded GPS lat, lon, heading
         dirname  = os.path.dirname(__file__)
-        filename = os.path.join(dirname, '../waypoints/test1waypoints.csv')
+        filename = os.path.join(dirname, '../waypoints/test2waypoints.csv')
         with open(filename) as f:
             path_points = [tuple(line) for line in csv.reader(f)]
         # x towards East and y towards North
@@ -320,7 +320,7 @@ class PurePursuit(object):
 
             # CHANGED STARRTING HERE
             
-            goal_arr = np.where(self.dist_arr >= self.look_ahead)[0]
+            goal_arr = np.where( (self.dist_arr < self.look_ahead + 0.3) & (self.dist_arr > self.look_ahead - 0.3) )[0]
             self.goal  = self.closest_wp_index
             # finding the goal point which is the last in the set of points less than the lookahead distance
             for idx in goal_arr:
@@ -351,7 +351,7 @@ class PurePursuit(object):
             alpha = math.atan2(math.sin(alpha), math.cos(alpha))
 
             # ----------------- tuning this part as needed -----------------
-            k = 1 
+            k = 0.41
             angle_i = (k * 2.0 * math.sin(alpha)) / L
             # ----------------- tuning this part as needed -----------------
             f_delta = math.atan(self.wheelbase * angle_i)

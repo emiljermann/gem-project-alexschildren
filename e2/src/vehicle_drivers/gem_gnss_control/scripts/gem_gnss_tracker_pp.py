@@ -357,6 +357,8 @@ class PurePursuit(object):
                     alpha_vector = math.atan2(dy, dx) - curr_yaw
                     alpha_vector = math.atan2(math.sin(alpha_vector), math.cos(alpha_vector))
                     if abs(alpha_vector) < np.pi/2:
+                        print(f"Difference: {curr_yaw-self.path_points_heading[idx]}")
+                        print(f"Alpha_vector: {alpha_vector}")
                         self.goal = idx
 
             # === DEBUG BLOCK START ===

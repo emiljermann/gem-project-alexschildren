@@ -138,8 +138,8 @@ class PurePursuit(object):
         self.path_plot.set_data(self.path_points_x, self.path_points_y)
         self.curr_pos_plot.set_data([curr_x], [curr_y])
         self.goal_plot.set_data([goal_x], [goal_y])
-        self.heading_arrows.arrows.set_UVC([arrow_len*np.cos(curr_h), arrow_len*np.cos(goal_h)], [arrow_len*np.sin(curr_h), arrow_len*np.sin(goal_h)])
-        self.heading_arrows.arrows.set_offsets(np.array([[curr_x, curr_y], [goal_x, goal_y]]))
+        self.heading_arrows.set_UVC([arrow_len*np.cos(curr_h), arrow_len*np.cos(goal_h)], [arrow_len*np.sin(curr_h), arrow_len*np.sin(goal_h)])
+        self.heading_arrows.set_offsets(np.array([[curr_x, curr_y], [goal_x, goal_y]]))
         self.ax.set_xlim(curr_x - 10, curr_x + 10)
         self.ax.set_ylim(curr_y - 10, curr_y + 10)
         self.fig.canvas.draw()
@@ -196,7 +196,7 @@ class PurePursuit(object):
     def read_waypoints(self):
         # read recorded GPS lat, lon, heading
         dirname  = os.path.dirname(__file__)
-        filename = os.path.join(dirname, '../waypoints/test1waypoints.csv')
+        filename = os.path.join(dirname, '../waypoints/test2waypoints.csv')
         with open(filename) as f:
             path_points = [tuple(line) for line in csv.reader(f)]
         # x towards East and y towards North
@@ -345,7 +345,13 @@ class PurePursuit(object):
                 temp_angle = self.find_angle(v1,v2)
                 # find correct look-ahead point by using heading information
                 if abs(curr_yaw-self.path_points_heading[idx]) < np.pi/2:
-                    self.goal = idx
+                    # make sure the look-ahead point is in front of the vehicle
+                    dx = self.path_points_x[idx] - curr_x
+                    dy = self.path_points_y[idx] - curr_y
+                    alpha_vector = math.atan2(dy, dx) - curr_yaw
+                    alpha_vector = math.atan2(math.sin(alpha_vector), math.cos(alpha_vector))
+                    if abs(alpha_vector) < np.pi/2:
+                        self.goal = idx
 
             # === DEBUG BLOCK START ===
             rospy.loginfo("----- GNSS / INS Debug -----")
@@ -389,7 +395,7 @@ class PurePursuit(object):
             dx = self.path_points_x[self.goal] - curr_x
             dy = self.path_points_y[self.goal] - curr_y
             alpha_vector = math.atan2(dy, dx) - curr_yaw
-            alpha_vector = math.atan2(math.sin(alpha), math.cos(alpha))
+            alpha_vector = math.atan2(math.sin(alpha_vector), math.cos(alpha_vector))
 
             alpha = alpha_heading * w + alpha_vector * (1-w)
             # ----------------- tuning this part as needed -----------------

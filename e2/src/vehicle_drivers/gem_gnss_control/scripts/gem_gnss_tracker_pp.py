@@ -127,18 +127,19 @@ class PurePursuit(object):
         self.path_plot, = self.ax.plot([], [], 'k--', label='Path')
         self.curr_pos_plot, = self.ax.plot([], [], 'bo', label='Current Position')
         self.goal_plot, = self.ax.plot([], [], 'ro', label='Goal Point')
-        self.heading_arrows, = self.ax.quiver([], [], [], [], angles='xy', scale_units='xy', scale=1, color='g')
+        self.heading_arrows = self.ax.quiver([0,0], [0,0], [0,0], [0,0], angles='xy', scale_units='xy', scale=1, color='g')
         self.ax.set_xlabel("X (m)")
         self.ax.set_ylabel("Y (m)")
         self.ax.set_title("Pure Pursuit Live Map")
         self.ax.legend()
     
     def update_plot(self, curr_x, curr_y, curr_h, goal_x, goal_y, goal_h):
+        arrow_len = 2
         self.path_plot.set_data(self.path_points_x, self.path_points_y)
         self.curr_pos_plot.set_data([curr_x], [curr_y])
         self.goal_plot.set_data([goal_x], [goal_y])
-        self.heading_arrows.set_UVC([curr_x+2*np.cos(curr_h), goal_x+2*np.cos(goal_h)], [curr_y+2*np.sin(curr_h), goal_y+2*np.sin(goal_h)])
-        self.heading_arrows.set_offsets(np.array([[curr_x, curr_y], [goal_x, goal_y]]))
+        self.heading_arrows.arrows.set_UVC([arrow_len*np.cos(curr_h), arrow_len*np.cos(goal_h)], [arrow_len*np.sin(curr_h), arrow_len*np.sin(goal_h)])
+        self.heading_arrows.arrows.set_offsets(np.array([[curr_x, curr_y], [goal_x, goal_y]]))
         self.ax.set_xlim(curr_x - 10, curr_x + 10)
         self.ax.set_ylim(curr_y - 10, curr_y + 10)
         self.fig.canvas.draw()

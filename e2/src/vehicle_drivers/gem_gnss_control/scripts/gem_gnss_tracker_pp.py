@@ -345,7 +345,6 @@ class PurePursuit(object):
                 # find correct look-ahead point by using heading information
                 if abs(curr_yaw-self.path_points_heading[idx]) < np.pi/2:
                     self.goal = idx
-                    break
 
             # === DEBUG BLOCK START ===
             rospy.loginfo("----- GNSS / INS Debug -----")
@@ -430,7 +429,7 @@ class PurePursuit(object):
 
             goal_x = self.path_points_x[self.goal]
             goal_y = self.path_points_y[self.goal]
-            goal_heading = self.heading_to_yaw(self.path_points_heading[self.goal])
+            goal_heading = self.path_points_heading[self.goal]
             self.update_plot(curr_x, curr_y, curr_yaw, goal_x, goal_y, goal_heading)
 
             self.rate.sleep()

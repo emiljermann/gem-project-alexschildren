@@ -1,6 +1,19 @@
 import struct
 import threading
 
+# Mappings:
+# A	0
+# B	1
+# X	2
+# Y	3
+# LB	4
+# RB	5
+# Back	6
+# Start	7
+# Left stick press	8
+# Right stick press	9
+# Axes are similarly mapped: Left stick is usually axes 0 and 1, triggers are axes 2/5, etc.
+
 class RawJoystickReader:
     def __init__(self, device="/dev/input/js0"):
         self.device = device

@@ -316,16 +316,21 @@ class PurePursuit(object):
             elif (self.pedestrian_state == "PICKING_UP"):
                 # ---------- ignore PACMod ----------
                 # ignore brake
-                self.brake_cmd.ignore  = True
+                
                 # ignore gas 
-                self.accel_cmd.ignore  = True
+                
 
-                self.brake_cmd.enable = True
-                self.brake_pub.publish(self.brake_cmd)
-                self.brake_cmd.f64_cmd = 0.5
-                print("PP Brake Ignored!")
-                self.accel_pub.publish(self.accel_cmd)
-                print("PP Gas Ignored!")
+                # This line manually sets the brake command to 0.5, which is not ideal. It should be working with the ignore flag.
+                # self.brake_cmd.f64_cmd = 0.5
+                self.brake_cmd.ignore  = False # "dont ignore" brake
+                self.brake_cmd.enable = True # Allow braking
+                self.brake_pub.publish(self.brake_cmd) # Send brake command
+                print("Brake command sent!")
+
+                self.accel_cmd.ignore  = True #ignore accel
+                self.accel_cmd.enable = False #restrict acceleration
+                self.accel_pub.publish(self.accel_cmd) #Send accel command
+                print("Accel command blocked!")
 
                 axes, buttons = self.controller.get_state()
                 rospy.loginfo(f"Joystick Axes: {axes}")

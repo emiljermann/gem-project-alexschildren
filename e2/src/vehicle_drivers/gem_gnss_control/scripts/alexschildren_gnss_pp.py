@@ -25,7 +25,7 @@ import matplotlib.pyplot as plt
 
 from filters import OnlineFilter
 from pid_controllers import PID
-
+from joystick_reader import RawJoystickReader
 
 # ROS Headers
 import alvinxy as axy # Import AlvinXY transformation module
@@ -77,6 +77,7 @@ class PurePursuit(object):
         self.max_accel     = 0.48 # % of acceleration
         self.pid_speed     = PID(0.5, 0.0, 0.1, wg=20)
         self.speed_filter  = OnlineFilter(1.2, 30, 4)
+        self.controller = RawJoystickReader()
         # @TODO: this should work? though per ros docs get_param is for static params
         self.stop_wp_index = rospy.get_param("~stop_waypoint_index", 120)  
         self.stop_dist     = rospy.get_param("~stop_distance_thresh", 1.0)
@@ -325,6 +326,10 @@ class PurePursuit(object):
                 print("PP Brake Ignored!")
                 self.accel_pub.publish(self.accel_cmd)
                 print("PP Gas Ignored!")
+
+                axes, buttons = self.controller.get_state()
+                rospy.loginfo(f"Joystick Axes: {axes}")
+                rospy.loginfo(f"Joystick Buttons: {buttons}")
 
 
 

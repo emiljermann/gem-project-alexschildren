@@ -21,6 +21,7 @@ import math
 import numpy as np
 from numpy import linalg as la
 import scipy.signal as signal
+import matplotlib.pyplot as plt
 
 from filters import OnlineFilter
 from pid_controllers import PID
@@ -123,6 +124,29 @@ class PurePursuit(object):
         # Pedestrian pickup time subscriber
         self.pub_pickup_time = rospy.Publisher('pedestrian_detector/pickup_time', Float32, queue_size = 1)
 
+        # OUR LOCATION V.S. GOAL POINT ON PURE PURSUIT POINT MAP
+        plt.ion()
+        self.fig, self.ax = plt.subplots()
+        self.path_plot, = self.ax.plot([], [], 'k--', label='Path')
+        self.curr_pos_plot, = self.ax.plot([], [], 'bo', label='Current Position')
+        self.goal_plot, = self.ax.plot([], [], 'ro', label='Goal Point')
+        self.heading_arrows = self.ax.quiver([0,0], [0,0], [0,0], [0,0], angles='xy', scale_units='xy', scale=1, color='g')
+        self.ax.set_xlabel("X (m)")
+        self.ax.set_ylabel("Y (m)")
+        self.ax.set_title("Pure Pursuit Live Map")
+        self.ax.legend()
+    
+    def update_plot(self, curr_x, curr_y, curr_h, goal_x, goal_y, goal_h):
+        arrow_len = 2
+        self.path_plot.set_data(self.path_points_x, self.path_points_y)
+        self.curr_pos_plot.set_data([curr_x], [curr_y])
+        self.goal_plot.set_data([goal_x], [goal_y])
+        self.heading_arrows.set_UVC([arrow_len*np.cos(curr_h), arrow_len*np.cos(goal_h)], [arrow_len*np.sin(curr_h), arrow_len*np.sin(goal_h)])
+        self.heading_arrows.set_offsets(np.array([[curr_x, curr_y], [goal_x, goal_y]]))
+        self.ax.set_xlim(curr_x - 10, curr_x + 10)
+        self.ax.set_ylim(curr_y - 10, curr_y + 10)
+        self.fig.canvas.draw()
+        self.fig.canvas.flush_events()
 
     def ins_callback(self, msg):
         self.heading = round(msg.heading, 6)
@@ -396,6 +420,11 @@ class PurePursuit(object):
             self.accel_pub.publish(self.accel_cmd)
             self.steer_pub.publish(self.steer_cmd)
             self.turn_pub.publish(self.turn_cmd)
+            
+            goal_x = self.path_points_x[self.goal]
+            goal_y = self.path_points_y[self.goal]
+            goal_heading = self.path_points_heading[self.goal]
+            self.update_plot(curr_x, curr_y, curr_yaw, goal_x, goal_y, goal_heading)
 
             self.rate.sleep()
 

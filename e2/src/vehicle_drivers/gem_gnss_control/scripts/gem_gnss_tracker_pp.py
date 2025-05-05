@@ -410,7 +410,7 @@ class PurePursuit(object):
             # ----------------- tuning this part as needed -----------------
             k       = 0.41 
             angle_i = math.atan((k * 2 * self.wheelbase * math.sin(alpha)) / L) 
-            angle   = angle_i*2
+            angle   = angle_i #*2
             # ----------------- tuning this part as needed -----------------
 
             f_delta = round(np.clip(angle, -0.61, 0.61), 3)

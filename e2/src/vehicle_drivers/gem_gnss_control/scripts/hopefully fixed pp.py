@@ -280,9 +280,9 @@ class PurePursuit(object):
             if (self.pedestrian_state == "SEARCHING" and self.gem_enable):
                 # ---------- dont ignore PACMod ----------
                 # dont ignore brake
-                self.brake_cmd.ignore  = True
+                self.brake_cmd.ignore  = False
                 # dont ignore gas 
-                self.accel_cmd.ignore  = True
+                self.accel_cmd.ignore  = False
 
                 self.brake_pub.publish(self.brake_cmd)
                 print("PP Brake Not Ignored!")

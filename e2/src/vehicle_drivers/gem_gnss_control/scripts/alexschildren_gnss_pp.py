@@ -319,10 +319,14 @@ class PurePursuit(object):
                 # ignore gas 
                 self.accel_cmd.ignore  = True
 
+                self.brake_cmd.enable = True
                 self.brake_pub.publish(self.brake_cmd)
+                self.brake_cmd.f64_cmd = 0.5
                 print("PP Brake Ignored!")
                 self.accel_pub.publish(self.accel_cmd)
                 print("PP Gas Ignored!")
+
+
 
             self.path_points_x = np.array(self.path_points_lon_x)
             self.path_points_y = np.array(self.path_points_lat_y)

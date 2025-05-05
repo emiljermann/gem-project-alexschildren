@@ -350,7 +350,8 @@ class PurePursuit(object):
                 v2 = [np.cos(curr_yaw), np.sin(curr_yaw)]
                 temp_angle = self.find_angle(v1,v2)
                 # find correct look-ahead point by using heading information
-                if abs(curr_yaw-self.path_points_heading[idx]) < np.pi/2:
+                diff = abs(curr_yaw-self.path_points_heading[idx])
+                if min(diff, np.pi()*2 - diff) < np.pi/2:
                     # make sure the look-ahead point is in front of the vehicle
                     dx = self.path_points_x[idx] - curr_x
                     dy = self.path_points_y[idx] - curr_y

@@ -46,7 +46,7 @@ class PurePursuit(object):
 
         self.rate       = rospy.Rate(10)
 
-        self.look_ahead = 3.5
+        self.look_ahead = 2.5
         self.wheelbase  = 1.75 # meters
         self.offset     = 0.46 # meters
 
@@ -76,8 +76,8 @@ class PurePursuit(object):
         self.goal       = 0            
         self.read_waypoints() 
 
-        self.desired_speed = 1.5  # m/s, reference speed
-        self.max_accel     = 0.48 # % of acceleration
+        self.desired_speed = 1.0  # m/s, reference speed
+        self.max_accel     = 0.45 # % of acceleration
         self.pid_speed     = PID(0.5, 0.0, 0.1, wg=20)
         self.speed_filter  = OnlineFilter(1.2, 30, 4)
         self.controller = RawJoystickReader()
@@ -88,6 +88,7 @@ class PurePursuit(object):
         self.stop_dist     = rospy.get_param("~stop_distance_thresh", 1.0)
         self.stopped       = False
         self._last_logged_dist_to_stop = None
+        self.closest_wp_index = None
         self._log_dist_threshold = 0.5  # meters
         # -------------------- PACMod setup --------------------
 
@@ -376,7 +377,7 @@ class PurePursuit(object):
 
                 if (self.pacmod_enable == True):
                         # ---------- enable PACMod ----------
-
+                        print("RENABLED PACMod!")
                         # enable forward gear
                         self.gear_cmd.ui16_cmd = 3
 
@@ -486,6 +487,7 @@ class PurePursuit(object):
                 print("Crosstrack Error: " + str(ct_error))
                 print("Front steering angle: " + str(np.degrees(f_delta)) + " degrees")
                 print("Steering wheel angle: " + str(steering_angle) + " degrees" )
+                print(f"Ignored: {self.brake_cmd.ignore}, {self.accel_cmd.ignore}")
                 print("\n")
 
             current_time = rospy.get_time()

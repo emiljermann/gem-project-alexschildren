@@ -18,7 +18,7 @@ import datetime
 
 from filters import OnlineFilter
 
-# import alvinxy.alvinxy as axy # Import AlvinXY transformation module
+import alvinxy as axy # Import AlvinXY transformation module
 
 # ROS Headers
 import rospy
@@ -125,8 +125,8 @@ class PedestrianDetector:
         self.ts.registerCallback(self.img_callback)
 
         # Subscribe to GNSS data (All my homies hate Inspva)
-        self.gnss_sub   = rospy.Subscriber("/septentrio_gnss/navsatfix", NavSatFix)
-        self.ins_sub    = rospy.Subscriber("/septentrio_gnss/insnavgeod", INSNavGeod)
+        self.gnss_sub   = message_filters.Subscriber("/septentrio_gnss/navsatfix", NavSatFix)
+        self.ins_sub    = message_filters.Subscriber("/septentrio_gnss/insnavgeod", INSNavGeod)
 
         # Gets pacmod enable 
         self.enable_sub = rospy.Subscriber("/pacmod/as_tx/enable", Bool, self.enable_callback)
@@ -147,8 +147,8 @@ class PedestrianDetector:
         # ###############################################################################
         # # Controller Initialization
         # ###############################################################################
-        self.pub_speed_command = rospy.Publisher("/pacmod/as_rx/accel_cmd", Float64, queue_size=1)
-        self.pub_brake_command = rospy.Publisher("/pacmod/as_rx/brake_cmd", Float64, queue_size=1)
+        self.pub_speed_command = rospy.Publisher("/pacmod/as_rx/accel_cmd", PacmodCmd, queue_size=1)
+        self.pub_brake_command = rospy.Publisher("/pacmod/as_rx/brake_cmd", PacmodCmd, queue_size=1)
         # self.pedestrian_proximity_threshold = 5.0  # meters
         # self.slowing_threshold = 10.0  # meters
         # self.normal_speed = 0.3  # normal throttle value
@@ -243,7 +243,7 @@ class PedestrianDetector:
 
     def control_vehicle_for_pedestrian(self, pedestrian_distance):
         """
-        If the pedestrian is within 5 m, apply a full brake. Otherwise, do nothing.
+        If the pedestrian is within 5 m, apply a full brake. Otherwise, do nothing.
         
         Args:
             pedestrian_distance: Mean distance to pedestrian in meters
@@ -267,9 +267,9 @@ class PedestrianDetector:
 
         if self.has_picked_up_pedestrian:
             return
-        # Hard brake if within 5 m
+        # Hard brake if within 5 m
         if pedestrian_distance <= 5.0:
-            rospy.loginfo(f"Pedestrian within 5m ({pedestrian_distance:.2f} m) – applying hard brake")
+            rospy.loginfo(f"Pedestrian within 5m ({pedestrian_distance:.2f} m) – applying hard brake")
 
             time_to_stop = rospy.Time.now() - self.time_pedestrian_detected
             rospy.loginfo(f"Time to stop for pedestrian: {time_to_stop}")

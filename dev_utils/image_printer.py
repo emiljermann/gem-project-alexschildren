@@ -96,7 +96,7 @@ class Printer:
         except CvBridgeError as e:
             print(e)
 
-    def save_video(self, filename="output_video.avi", fps=10):
+    def save_video(self, filename="output_video.mp4", fps=10):
         if not self.video_frames:
             print("No frames to save.")
             return

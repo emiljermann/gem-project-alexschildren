@@ -32,7 +32,7 @@ import alvinxy as axy # Import AlvinXY transformation module
 import rospy
 
 # GEM Sensor Headers
-from std_msgs.msg import String, Bool, Float32, Float64
+from std_msgs.msg import String, Bool, Float32, Float64, Float64MultiArray
 from sensor_msgs.msg import NavSatFix
 from septentrio_gnss_driver.msg import INSNavGeod
 
@@ -68,7 +68,10 @@ class PurePursuit(object):
 
         self.pedestrian_state = None
         self.sub_pedestrian_state = rospy.Subscriber("pedestrian_detector/state", String, self.state_callback)
-
+        self.sub_pedestrian_gnss = rospy.Subscriber("pedestrian_detector/gnss", Float64MultiArray, self.pedestrian_gnss_callback)
+        self.pedestrian_lat = None
+        self.pedestrian_lon = None
+        
         # read waypoints into the system 
         self.goal       = 0            
         self.read_waypoints() 
@@ -131,6 +134,7 @@ class PurePursuit(object):
         self.path_plot, = self.ax.plot([], [], 'k--', label='Path')
         self.curr_pos_plot, = self.ax.plot([], [], 'bo', label='Current Position')
         self.goal_plot, = self.ax.plot([], [], 'ro', label='Goal Point')
+        self.pedestrian_plot, = self.ax.plot([], [], 'go', label='Pedestrian Point')
         self.heading_arrows = self.ax.quiver([0,0], [0,0], [0,0], [0,0], angles='xy', scale_units='xy', scale=1, color='g')
         self.ax.set_xlabel("X (m)")
         self.ax.set_ylabel("Y (m)")
@@ -142,6 +146,11 @@ class PurePursuit(object):
         self.path_plot.set_data(self.path_points_x, self.path_points_y)
         self.curr_pos_plot.set_data([curr_x], [curr_y])
         self.goal_plot.set_data([goal_x], [goal_y])
+
+        if self.pedestrian_lat and self.pedestrian_lon:
+            local_x, local_y = self.wps_to_local_xy(self.pedestrian_lon, self.pedestrian_lat)
+            self.pedestrian_plot.set_data([local_x], [local_y])
+
         self.heading_arrows.set_UVC([arrow_len*np.cos(curr_h), arrow_len*np.cos(goal_h)], [arrow_len*np.sin(curr_h), arrow_len*np.sin(goal_h)])
         self.heading_arrows.set_offsets(np.array([[curr_x, curr_y], [goal_x, goal_y]]))
         self.ax.set_xlim(curr_x - 10, curr_x + 10)
@@ -151,6 +160,10 @@ class PurePursuit(object):
 
     def ins_callback(self, msg):
         self.heading = round(msg.heading, 6)
+
+    def pedestrian_gnss_callback(self, msg):
+        self.pedestrian_lat = round(msg.data[0], 6)
+        self.pedestrian_lon = round(msg.data[1], 6)
     
     def gnss_callback(self, msg):
         self.lat = round(msg.latitude, 6)

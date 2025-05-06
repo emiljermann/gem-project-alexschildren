@@ -142,7 +142,7 @@ class PedestrianDetector:
         self.pub_depth = rospy.Publisher("pedestrian_detection/avg_depth", Float32MultiArray, queue_size=1)
         self.pub_pedestrian_gnss = rospy.Publisher("pedestrian_detector/gnss", Float64MultiArray)
         self.pub_pedestrian_state = rospy.Publisher("pedestrian_detector/state", String, queue_size = 1)
-
+        self.has_picked_up_pedestrian = False
 
         # ###############################################################################
         # # Controller Initialization
@@ -265,6 +265,8 @@ class PedestrianDetector:
             self.accel_cmd.ignore  = False
             self.accel_cmd.f64_cmd = 0.0
 
+        if self.has_picked_up_pedestrian:
+            return
         # Hard brake if within 5 m
         if pedestrian_distance <= 5.0:
             rospy.loginfo(f"Pedestrian within 5m ({pedestrian_distance:.2f} m) – applying hard brake")
@@ -275,12 +277,14 @@ class PedestrianDetector:
 
             pedestrian_brake_state = "PICKING_UP"
             self.pub_pedestrian_state.publish(String(data = pedestrian_brake_state))
-            
-            self.brake_cmd.f64_cmd = 1.0 # Max braking
-            self.accel_cmd.f64_cmd = 0.0
 
-            self.pub_speed_command.publish(self.accel_cmd)
-            self.pub_brake_command.publish(self.brake_cmd)  
+            self.has_picked_up_pedestrian = True
+            
+            # self.brake_cmd.f64_cmd = 1.0 # Max braking
+            # self.accel_cmd.f64_cmd = 0.0
+
+            # self.pub_speed_command.publish(self.accel_cmd)
+            # self.pub_brake_command.publish(self.brake_cmd)  
         else:
             pedestrian_brake_state = "SEARCHING"
             self.pub_pedestrian_state.publish(String(data = pedestrian_brake_state))

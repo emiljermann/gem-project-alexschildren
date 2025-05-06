@@ -78,10 +78,14 @@ class PurePursuit(object):
         self.pid_speed     = PID(0.5, 0.0, 0.1, wg=20)
         self.speed_filter  = OnlineFilter(1.2, 30, 4)
         self.controller = RawJoystickReader()
+        self.prev_axes = None
+        self.prev_buttons = None
         # @TODO: this should work? though per ros docs get_param is for static params
-        self.stop_wp_index = rospy.get_param("~stop_waypoint_index", 120)  
+        self.stop_wp_index = rospy.get_param("~stop_waypoint_index", None)  
         self.stop_dist     = rospy.get_param("~stop_distance_thresh", 1.0)
         self.stopped       = False
+        self._last_logged_dist_to_stop = None
+        self._log_dist_threshold = 0.5  # meters
         # -------------------- PACMod setup --------------------
 
         self.gem_enable    = False
@@ -196,6 +200,24 @@ class PurePursuit(object):
         self.turn_cmd.ui16_cmd = 1
         self.turn_pub.publish(self.turn_cmd)
 
+    def resume_motion(self):
+        # Clear brake command
+        self.brake_cmd.enable = False
+        self.brake_cmd.f64_cmd = 0.0
+        self.brake_pub.publish(self.brake_cmd)
+
+        # Re-enable acceleration (set f64_cmd elsewhere based on control)
+        self.accel_cmd.enable = True
+        self.accel_cmd.ignore = False
+        self.accel_cmd.clear = False
+        self.accel_pub.publish(self.accel_cmd)
+
+        # Neutral turn signal (unless you're setting this elsewhere)
+        self.turn_cmd.ui16_cmd = 1
+        self.turn_pub.publish(self.turn_cmd)
+
+        # self.stopped = False  # optional: reset if you want to re-enter motion state
+
 
     def read_waypoints(self):
         # read recorded GPS lat, lon, heading
@@ -243,25 +265,95 @@ class PurePursuit(object):
     def dist(self, p1, p2):
         return round(np.sqrt((p1[0] - p2[0]) ** 2 + (p1[1] - p2[1]) ** 2), 3)
     
-    def estimate_drive_time_to_stop_point(self):
-        if self.closest_wp_index < 0 or self.stop_wp_index < 0:
+    def estimate_drive_time_to_stop_point_arc(self):
+        if self.closest_wp_index < 0 or self.stop_wp_index < 0 or self.stop_wp_index >= self.wp_size or self.closest_wp_index >= self.wp_size:
             return float('inf')  # invalid indices
-
-        if self.closest_wp_index >= self.stop_wp_index:
-            return 0.0  # already past or at the stop point
+        
+        if self.closest_wp_index == self.stop_wp_index:
+            return 0.0
 
         total_distance = 0.0
-        for i in range(self.closest_wp_index, self.stop_wp_index):
+        i = self.closest_wp_index
+        while i != self.stop_wp_index:
             x1 = self.path_points_x[i]
             y1 = self.path_points_y[i]
-            x2 = self.path_points_x[i+1]
-            y2 = self.path_points_y[i+1]
+            i_next = (i + 1) % self.wp_size  # wrap around
+            x2 = self.path_points_x[i_next]
+            y2 = self.path_points_y[i_next]
             total_distance += self.dist((x1, y1), (x2, y2))
+            i = i_next
+            if i == self.closest_wp_index:
+                # Full loop completed, stop_wp_index must not be reachable
+                return float('inf')
 
-        if self.speed <= 0.1:
-            return total_distance / 0.1  # avoid divide by zero / unrealistic speed
-        else:
-            return total_distance / self.speed  # estimated time in seconds
+        # Avoid divide by zero
+        effective_speed = max(self.speed, 0.1)
+        return total_distance / effective_speed
+    
+    def estimate_drive_time_to_stop_point_birds_eye(self):
+        if self.stop_wp_index < 0 or self.stop_wp_index >= self.wp_size:
+            return float('inf')  # invalid index
+
+        curr_x, curr_y, _ = self.get_gem_state()
+
+        stop_x = self.path_points_x[self.stop_wp_index]
+        stop_y = self.path_points_y[self.stop_wp_index]
+
+        dist_to_stop = self.dist((curr_x, curr_y), (stop_x, stop_y))
+
+        effective_speed = max(self.speed, 0.1)
+
+        return dist_to_stop / effective_speed
+    
+    def handle_pickup(self):
+        self._apply_brakes()
+
+        axes, buttons = self.controller.get_state()
+        if axes != self.prev_axes or buttons != self.prev_buttons:
+            rospy.loginfo(f"Joystick Axes: {axes}")
+            rospy.loginfo(f"Joystick Buttons: {buttons}")
+        self.prev_axes = axes
+        self.prev_buttons = buttons
+
+        # Dropoff selection
+
+        dropoff_options = {
+            1: (1, 18.283, -12.34, -0.01, "the start", ),                        # the start
+            2: (386, 71.517, -4.92, 1.8999, "90 degrees into first circle"),     # 90 degrees into first circle
+            3: (866, -10.496, -12.086, 2.8312, "start of other circle")          # start of the other circle
+        }
+
+        print("Select a dropoff location:")
+        for i, (idx, x, y, theta, desc) in dropoff_options.items():
+            print(f"{i}) x={x}, y={y} ({desc})")
+
+        while True:
+            try:
+                choice = int(input("Enter the number of your choice (1-3): "))
+                if choice in dropoff_options:
+                    dropoff_point = dropoff_options[choice]
+                    idx, x, y, theta, desc = dropoff_point
+                    print(f"Selected waypoint {idx}: ({x}, {y}) — {desc}")
+                    
+                    if idx >= self.wp_size:
+                        rospy.logwarn(f"Dropoff index {idx} out of bounds. Max is {self.wp_size - 1}")
+                        continue
+
+                    self.stop_wp_index = idx
+                    self.closest_wp_index = int(np.argmin(self.dist_arr))
+                    estimated_time_to_stop_point = self.estimate_drive_time_to_stop_point_arc()
+                    # estimated_time_to_stop_point = self.estimate_drive_time_to_stop_point_birds_eye()
+                    rospy.loginfo(f"Estimated time to dropoff pedestrian: {estimated_time_to_stop_point}")
+                    self.pub_pickup_time.publish(Float32(estimated_time_to_stop_point))
+
+                    self.pedestrian_state = "DROPPING_OFF" # could easily get overriden by pedestrian_detection.py if it sees another pedestrian
+                    self.resume_motion()
+                    break
+                else:
+                    print("Invalid choice. Please enter 1, 2, or 3.")
+            except ValueError:
+                print("Please enter a valid number.")
+
 
     def start_pp(self):
         
@@ -300,38 +392,6 @@ class PurePursuit(object):
                         print("PP Gas Engaged!")
 
                         self.gem_enable = True
-            
-            # State tracking, ignores command if state is PICKING_UP
-            if (self.pedestrian_state == "SEARCHING" and self.gem_enable):
-                # ---------- dont ignore PACMod ----------
-                # dont ignore brake
-                self.brake_cmd.ignore  = False
-                # dont ignore gas 
-                self.accel_cmd.ignore  = False
-
-                self.brake_pub.publish(self.brake_cmd)
-                print("PP Brake Not Ignored!")
-                self.accel_pub.publish(self.accel_cmd)
-                print("PP Gas Ignored!")
-            elif (self.pedestrian_state == "PICKING_UP"):
-                # ---------- ignore PACMod ----------
-                # ignore brake
-                self.brake_cmd.ignore  = True
-                # ignore gas 
-                self.accel_cmd.ignore  = True
-
-                self.brake_cmd.enable = True
-                self.brake_pub.publish(self.brake_cmd)
-                self.brake_cmd.f64_cmd = 0.5
-                print("PP Brake Ignored!")
-                self.accel_pub.publish(self.accel_cmd)
-                print("PP Gas Ignored!")
-
-                axes, buttons = self.controller.get_state()
-                rospy.loginfo(f"Joystick Axes: {axes}")
-                rospy.loginfo(f"Joystick Buttons: {buttons}")
-
-
 
             self.path_points_x = np.array(self.path_points_lon_x)
             self.path_points_y = np.array(self.path_points_lat_y)
@@ -342,17 +402,37 @@ class PurePursuit(object):
             for i in range(len(self.path_points_x)):
                 self.dist_arr[i] = self.dist((self.path_points_x[i], self.path_points_y[i]), (curr_x, curr_y))
 
-            # index of the closest point to current position
-            self.closest_wp_index = int(np.argmin(self.dist_arr))
-            if self.stop_wp_index > 0:
-                estimated_time_to_stop_point = self.estimate_drive_time_to_stop_point()
-                rospy.loginfo(f"Estimated time to stop for pedestrian: {estimated_time_to_stop_point}")
-                self.pub_pickup_time.publish(Float32(estimated_time_to_stop_point))
+        
+            # -----------------------------------STATE CODE BEGINS------------------------------------------------------------------
+            # State tracking, FULL BRAKE when picking up, wait for user input to set state to DROPPING_OFF
+            # if (self.pedestrian_state == "SEARCHING" and self.gem_enable):
+            #     # do something
+            # #el
+            if (self.pedestrian_state == "PICKING_UP" and self.gem_enable):
+                self.handle_pickup() # brakes, waits for user input, unbrakes and sets state to "DROPPING_OFF"
+            
+            if not self.stopped and self.stop_wp_index is not None:
+                stop_x = self.path_points_x[self.stop_wp_index]
+                stop_y = self.path_points_y[self.stop_wp_index]
+                dist_to_stop = self.dist((curr_x, curr_y), (stop_x, stop_y))
+
+                if dist_to_stop <= self.stop_dist:
+                    rospy.loginfo("Reached stop waypoint %d  (%.2f m away) - braking", self.stop_wp_index, dist_to_stop)
+                    self._apply_brakes()
+                    self.stopped = True
+                else: # just for clean printing, dw about this
+                    if (self._last_logged_dist_to_stop is None or
+                        abs(dist_to_stop - self._last_logged_dist_to_stop) >= self._log_dist_threshold):
+                        rospy.loginfo("Not at stop waypoint %d  (still %.2f m away) - continuing", self.stop_wp_index, dist_to_stop)
+                        self._last_logged_dist_to_stop = dist_to_stop
+
+            if self.stopped:
+                self.rate.sleep()
+                continue
+            # -----------------------------------STATE CODE ENDS------------------------------------------------------------------
+
 
             # finding those points which are less than the look ahead distance (will be behind and ahead of the vehicle)
-
-            # CHANGED STARRTING HERE
-            
             goal_arr = np.where( (self.dist_arr < self.look_ahead + 0.3) & (self.dist_arr > self.look_ahead - 0.3) )[0]
             self.goal  = self.closest_wp_index
             # finding the goal point which is the last in the set of points less than the lookahead distance
@@ -362,21 +442,9 @@ class PurePursuit(object):
                 if np.dot(v1, v2) > 0:
                     self.goal = idx
 
-            # # finding the distance between the goal point and the vehicle
-            # # true look-ahead distance between a waypoint and current position
+            # finding the distance between the goal point and the vehicle
             L = self.dist_arr[self.goal]
             L = max(L, 0.1)
-            # if (not self.stopped and self.stop_wp_index >= 0 and self.goal >= self.stop_wp_index and L <= self.stop_dist):                 
-            #     rospy.loginfo("Reached stop waypoint %d  (d=%.2fm) - braking", self.stop_wp_index, L)
-            #     self._apply_brakes()
-            #     self.stopped = True
-
-            # if self.stopped:
-            #     self.rate.sleep()
-            #     continue
-
-            
-
             
             dx = self.path_points_x[self.goal] - curr_x
             dy = self.path_points_y[self.goal] - curr_y

@@ -455,13 +455,18 @@ class PurePursuit(object):
                 v2 = [math.cos(curr_yaw), math.sin(curr_yaw)]
                 if np.dot(v1, v2) > 0:
                     self.goal = idx
-
-            # finding the distance between the goal point and the vehicle
+                    break
+            if self.goal + 1 < len(self.path_points_x):
+                goal2 = self.goal + 1
+            else:
+                goal2 = len(self.path_points_x) - 1
+            
+            
             L = self.dist_arr[self.goal]
             L = max(L, 0.1)
             
-            dx = self.path_points_x[self.goal] - curr_x
-            dy = self.path_points_y[self.goal] - curr_y
+            dx = self.path_points_x[goal2] - self.path_points_x[self.goal]
+            dy = self.path_points_y[goal2] - self.path_points_y[self.goal]
             alpha = math.atan2(dy, dx) - curr_yaw
             alpha = math.atan2(math.sin(alpha), math.cos(alpha))
 

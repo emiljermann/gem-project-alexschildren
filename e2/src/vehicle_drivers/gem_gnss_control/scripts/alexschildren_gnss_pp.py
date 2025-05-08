@@ -71,6 +71,8 @@ class PurePursuit(object):
         self.sub_pedestrian_gnss = rospy.Subscriber("pedestrian_detector/gnss", Float64MultiArray, self.pedestrian_gnss_callback)
         self.pedestrian_lat = None
         self.pedestrian_lon = None
+
+        self.pub_state_override = rospy.Publisher("pedestrian_detector/state_override", String, queue_size=1)
         
         # read waypoints into the system 
         self.goal       = 0            
@@ -360,6 +362,7 @@ class PurePursuit(object):
                     rospy.loginfo(f"Estimated time to dropoff pedestrian: {estimated_time_to_stop_point}")
                     self.pub_pickup_time.publish(Float32(estimated_time_to_stop_point))
 
+                    self.pub_state_override.publish(String(data="DROPPING_OFF"))
                     self.pedestrian_state = "DROPPING_OFF" # could easily get overriden by pedestrian_detection.py if it sees another pedestrian
                     self.resume_motion()
                     break
@@ -424,8 +427,7 @@ class PurePursuit(object):
             # #el
             if (self.pedestrian_state == "PICKING_UP" and self.gem_enable):
                 self.handle_pickup() # brakes, waits for user input, unbrakes and sets state to "DROPPING_OFF"
-            
-            if not self.stopped and self.stop_wp_index is not None:
+            elif self.pedestrian_state == "DROPPING_OFF" and self.stop_wp_index is not None:
                 stop_x = self.path_points_x[self.stop_wp_index]
                 stop_y = self.path_points_y[self.stop_wp_index]
                 dist_to_stop = self.dist((curr_x, curr_y), (stop_x, stop_y))
@@ -433,16 +435,22 @@ class PurePursuit(object):
                 if dist_to_stop <= self.stop_dist:
                     rospy.loginfo("Reached stop waypoint %d  (%.2f m away) - braking", self.stop_wp_index, dist_to_stop)
                     self._apply_brakes()
-                    self.stopped = True
+                    # would be cool if it could conclude pedestrian has left the vehicle autonomously but we'll just wait 20 seconds for now
+                    for _ in range(20):
+                        if rospy.is_shutdown():
+                            return
+                        rospy.sleep(1)
+                    self.pub_state_override.publish(String(data="SEARCHING"))  # Release override
+                    self.stop_wp_index = None
+                    self._last_logged_dist_to_stop = None
+                    self.closest_wp_index = None
+                    self.resume_motion()
                 else: # just for clean printing, dw about this
                     if (self._last_logged_dist_to_stop is None or
                         abs(dist_to_stop - self._last_logged_dist_to_stop) >= self._log_dist_threshold):
                         rospy.loginfo("Not at stop waypoint %d  (still %.2f m away) - continuing", self.stop_wp_index, dist_to_stop)
                         self._last_logged_dist_to_stop = dist_to_stop
 
-            if self.stopped:
-                self.rate.sleep()
-                continue
             # -----------------------------------STATE CODE ENDS------------------------------------------------------------------
 
 

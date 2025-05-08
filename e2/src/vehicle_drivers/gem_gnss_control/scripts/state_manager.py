@@ -62,9 +62,11 @@ Transitions:
 """
 class StateManager:
     def __init__(self):
-        self.rate       = rospy.Rate(10)
+
         
         rospy.init_node('state_manager_node', anonymous=True)
+        
+        self.rate       = rospy.Rate(10)
         
         self.transition_sub = message_filters.Subscriber("/state_manager_node/transition", String, self.transition_callback)
         self.pub_state = rospy.Publisher("state_manager_node/state", String, queue_size=1)
@@ -115,6 +117,7 @@ if __name__ == "__main__":
         state_manager = StateManager()
         print("State Manager Node Initialized, Starting...")
         state_manager.start_manager()
+        rospy.spin()
     except rospy.ROSInterruptException:
         pass
 

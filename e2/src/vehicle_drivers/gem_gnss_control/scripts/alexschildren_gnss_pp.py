@@ -398,9 +398,9 @@ class PurePursuit(object):
     def pp_iter(self):
         curr_x, curr_y, curr_yaw = self.get_gem_state()
         #Polyfit to the next few points and the original
-        num_points = 4
-        jump = 5
-        degree = 3
+        num_points = 2
+        jump = 1
+        degree = 2
         point_idx = np.arange(self.goal, self.goal+num_points*jump, jump)%self.wp_size
         points_x = self.path_points_x[point_idx]
         points_y = self.path_points_y[point_idx]
@@ -408,7 +408,12 @@ class PurePursuit(object):
         points_y = np.insert(points_y, 0, curr_y)
         coeffs = np.polyfit(points_x, points_y, degree)
         poly = np.poly1d(coeffs)
-        self.polyfit_yaw = np.atan(poly.deriv()(curr_x))
+        self.polyfit_yaw = math.atan(poly.deriv()(curr_x))
+        
+        v1 = [math.cos(curr_yaw), math.sin(curr_yaw)]
+        v2 = [math.cos(self.polyfit_yaw), math.sin(self.polyfit_yaw)]
+        if np.dot(v1, v2) < 0:
+            self.polyfit_yaw += np.pi
         self.poly = poly
         
         L = self.dist_arr[self.goal]

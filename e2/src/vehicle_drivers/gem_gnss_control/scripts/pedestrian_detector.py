@@ -142,6 +142,8 @@ class PedestrianDetector:
         self.pub_depth = rospy.Publisher("pedestrian_detection/avg_depth", Float32MultiArray, queue_size=1)
         self.pub_pedestrian_gnss = rospy.Publisher("pedestrian_detector/gnss", Float64MultiArray)
         self.pub_pedestrian_state = rospy.Publisher("pedestrian_detector/state", String, queue_size = 1)
+        self.state_override = ""
+        self.sub_state_override = rospy.Subscriber("pedestrian_detector/state_override", String, self.override_callback)
         self.has_picked_up_pedestrian = False
 
         # ###############################################################################
@@ -175,6 +177,11 @@ class PedestrianDetector:
     ###############################################################################
     # Pedestrian GNSS Localization
     ###############################################################################
+
+    def override_callback(self, msg):
+        self.state_override = msg.data
+        if msg.data == "SEARCHING":
+            self.has_picked_up_pedestrian = False
 
     def gnss_callback(self, gnss_msg, ins_msg):
         self.lat     = gnss_msg.latitude  # latitude
@@ -265,8 +272,9 @@ class PedestrianDetector:
             self.accel_cmd.ignore  = False
             self.accel_cmd.f64_cmd = 0.0
 
-        if self.has_picked_up_pedestrian:
+        if self.has_picked_up_pedestrian or self.state_override == "DROPPING_OFF":
             return
+
         # Hard brake if within 5 m
         if pedestrian_distance <= 5.0:
             rospy.loginfo(f"Pedestrian within 5m ({pedestrian_distance:.2f} m) – applying hard brake")

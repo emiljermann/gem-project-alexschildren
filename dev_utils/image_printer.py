@@ -41,12 +41,9 @@ class Printer:
 
         # Rostopic Subscriptions
         self.sub_rgb_pedestrian_image = rospy.Subscriber("pedestrian_detection/rgb/pedestrian_image", Image, self.printer, queue_size=1)
-        self.sub_pedestrian_state = rospy.Subscriber("pedestrian_detection/state", String, self.state_callback)
-        self.sub_pickup_time = rospy.Subscriber('pedestrian_detector/pickup_time', Float32, self.pickup_time_callback)
-
+        self.sub_state = rospy.Subscriber("state_manager_node/state", String, self.state_callback)
        
-        self.pedestrian_state = "UNINITIALIZED"
-        self.estimated_pickup_time = float('inf')
+        self.state = "UNINITIALIZED"
 
         self.frame_count = 0
         self.save_images = True  # Toggle for saving
@@ -69,19 +66,13 @@ class Printer:
 
             font = cv2.FONT_HERSHEY_SIMPLEX
             font_scale = 0.6
-            color = (0, 255, 0)
+            color = (0, 255, 0) 
             thickness = 2
 
-            state_text = f"State: {self.pedestrian_state}"
-            time_text = f"Pickup Time: {self.estimated_pickup_time:.2f}s"
+            state_text = f"State: {self.state}"
 
             cv2.putText(img, state_text, (10, 30), font, font_scale, color, thickness)
-            cv2.putText(img, time_text, (10, 60), font, font_scale, color, thickness)
-
-            # # Display the image
-            # cv2.imshow("Pedestrian Detection", img)
-            # cv2.waitKey(1)
-
+            
             # Save image if enabled
             if self.save_images:
                 img_path = os.path.join(self.image_dir, f"frame_{self.frame_count:05d}.jpg")

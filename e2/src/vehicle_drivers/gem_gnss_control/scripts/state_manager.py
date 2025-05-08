@@ -68,12 +68,13 @@ class StateManager:
         
         self.rate       = rospy.Rate(10)
         
-        self.transition_sub = message_filters.Subscriber("/state_manager_node/transition", String, self.transition_callback)
+        self.transition_sub = rospy.Subscriber("/state_manager_node/transition", String, self.transition_callback)
         self.pub_state = rospy.Publisher("state_manager_node/state", String, queue_size=1)
-        self.state = "SEARCHING"
+        self.state = ""
         self.transition = ""
         
     def start_manager(self):
+        self.state = "SEARCHING"
         self.publish_state()
            
     def publish_state(self):
@@ -91,7 +92,9 @@ class StateManager:
         
     def run(self):
         # Runs the state machine and updates current state
-        if self.state == "SEARCHING":
+        if self.transition == "BOOT":
+            self.start_manager()
+        elif self.state == "SEARCHING":
             if self.transition == "PICKING_UP":
                 self.state = "PICKING_UP"
         elif self.state == "PICKING_UP":
@@ -116,7 +119,6 @@ if __name__ == "__main__":
     try:
         state_manager = StateManager()
         print("State Manager Node Initialized, Starting...")
-        state_manager.start_manager()
         rospy.spin()
     except rospy.ROSInterruptException:
         pass

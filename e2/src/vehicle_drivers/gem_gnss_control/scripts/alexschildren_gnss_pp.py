@@ -398,7 +398,7 @@ class PurePursuit(object):
     def pp_iter(self):
         curr_x, curr_y, curr_yaw = self.get_gem_state()
         #Polyfit to the next few points and the original
-        num_points = 2
+        num_points = 20
         jump = 1
         degree = 2
         point_idx = np.arange(self.goal, self.goal+num_points*jump, jump)%self.wp_size
@@ -408,7 +408,8 @@ class PurePursuit(object):
         points_y = np.insert(points_y, 0, curr_y)
         coeffs = np.polyfit(points_x, points_y, degree)
         poly = np.poly1d(coeffs)
-        self.polyfit_yaw = math.atan(poly.deriv()(curr_x))
+        px = (curr_x+self.path_points_x[self.goal])/2.0
+        self.polyfit_yaw = math.atan(poly.deriv()(px))
         
         v1 = [math.cos(curr_yaw), math.sin(curr_yaw)]
         v2 = [math.cos(self.polyfit_yaw), math.sin(self.polyfit_yaw)]
@@ -421,8 +422,10 @@ class PurePursuit(object):
         
         #@TODO: may need to be tuned to work with orientation
         # self.polyfit_yaw = self.heading_to_yaw(np.degrees(self.polyfit_yaw))
-        alpha = self.polyfit_yaw - curr_yaw
-
+        # alpha = self.polyfit_yaw - curr_yaw
+        dx = self.path_points_x[self.goal] - curr_x
+        dy = self.path_points_y[self.goal] - curr_y
+        alpha = math.atan2(dy, dx) - curr_yaw
         
         # ----------------- tuning this part as needed -----------------
         k = 0.41
@@ -471,6 +474,7 @@ class PurePursuit(object):
         
         
     def start_pp(self):
+        self.pub_transition.publish(String(data = "BOOT"))
         
         while not rospy.is_shutdown():
 

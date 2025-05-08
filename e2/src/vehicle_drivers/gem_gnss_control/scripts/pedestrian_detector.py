@@ -238,6 +238,7 @@ class PedestrianDetector:
             return False
 
         rgb = cv2.cvtColor(cropped_img, cv2.COLOR_BGR2RGB)
+        cropped_height, cropped_width, channels = cropped_img.shape
         results = self.pose.process(rgb)
         if not results.pose_landmarks:
             return False
@@ -247,16 +248,20 @@ class PedestrianDetector:
         # Left and right wrist and shoulder indices
         left_wrist = landmarks[15]
         left_shoulder = landmarks[11]
+        left_hip = landmarks[23]
         right_wrist = landmarks[16]
         right_shoulder = landmarks[12]
+        right_hip = landmarks[24]
+        nose = landmarks[0]
 
         # Visibility threshold check
         left_valid = left_wrist.visibility > 0.5 and left_shoulder.visibility > 0.5
         right_valid = right_wrist.visibility > 0.5 and right_shoulder.visibility > 0.5
 
-        # Allow either hand to be raised above shoulder level
-        left_hand_raised = left_valid and left_wrist.y < left_shoulder.y
-        right_hand_raised = right_valid and right_wrist.y < right_shoulder.y
+        # I want to make it so that wrist is only detected within a certain y range (upper half hip to nose)
+        # and that it's only detected past a certain x threshold (currently the outer quarters of the image)
+        left_hand_raised = left_valid and left_wrist.y > nose.y and left_wrist.y < (nose.y + abs(nose.y - left_hip.y) / 2.0) and (left_wrist.x < cropped_width / 4.0 or left_wrist.x > 3*(cropped_width / 4.0)) 
+        right_hand_raised = right_valid and right_wrist.y > nose.y and right_wrist.y < (nose.y + abs(nose.y - right_hip.y) / 2.0) and (right_wrist.x < cropped_width / 4.0 or right_wrist.x > 3*(cropped_width / 4.0))
 
         return left_hand_raised or right_hand_raised
     

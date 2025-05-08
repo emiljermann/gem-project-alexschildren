@@ -67,6 +67,12 @@ class PedestrianDetector:
         - Image processing parameters
         """
 
+
+        # State control
+        self.pub_transition = rospy.Publisher("state_manager_node/transition", String, queue_size = 1)
+        self.state_sub = message_filters.Subscriber("/state_manager_node/state", String, self.set_state)
+        self.state = ""
+        
         # Frame buffer for batch processing to increase efficiency
         self.frame_buffer = []
         self.buffer_size = 4  # Process 4 frames at once for better throughput
@@ -141,10 +147,6 @@ class PedestrianDetector:
         self.pub_rgb_pedestrian_image = rospy.Publisher("pedestrian_detection/rgb/pedestrian_image", Image, queue_size=1)
         self.pub_depth = rospy.Publisher("pedestrian_detection/avg_depth", Float32MultiArray, queue_size=1)
         self.pub_pedestrian_gnss = rospy.Publisher("pedestrian_detector/gnss", Float64MultiArray)
-        self.pub_pedestrian_state = rospy.Publisher("pedestrian_detector/state", String, queue_size = 1)
-        self.state_override = ""
-        self.sub_state_override = rospy.Subscriber("pedestrian_detector/state_override", String, self.override_callback)
-        self.has_picked_up_pedestrian = False
 
         # ###############################################################################
         # # Controller Initialization
@@ -174,14 +176,12 @@ class PedestrianDetector:
 
         self.last_save_time = rospy.Time.now()
 
+    def set_state(self, msg):
+        self.state = msg.data
+        
     ###############################################################################
     # Pedestrian GNSS Localization
     ###############################################################################
-
-    def override_callback(self, msg):
-        self.state_override = msg.data
-        if msg.data == "SEARCHING":
-            self.has_picked_up_pedestrian = False
 
     def gnss_callback(self, gnss_msg, ins_msg):
         self.lat     = gnss_msg.latitude  # latitude
@@ -248,7 +248,7 @@ class PedestrianDetector:
     # Vehicle Control Functions
     ###############################################################################
 
-    def control_vehicle_for_pedestrian(self, pedestrian_distance):
+    def transition_vehicle_for_pedestrian(self, pedestrian_distance):
         """
         If the pedestrian is within 5 m, apply a full brake. Otherwise, do nothing.
         
@@ -272,10 +272,7 @@ class PedestrianDetector:
             self.accel_cmd.ignore  = False
             self.accel_cmd.f64_cmd = 0.0
 
-        if self.has_picked_up_pedestrian or self.state_override == "DROPPING_OFF":
-            return
-
-        # Hard brake if within 5 m
+        # Request stop if pedestrian detected within 5m 
         if pedestrian_distance <= 5.0:
             rospy.loginfo(f"Pedestrian within 5m ({pedestrian_distance:.2f} m) – applying hard brake")
 
@@ -283,24 +280,9 @@ class PedestrianDetector:
             rospy.loginfo(f"Time to stop for pedestrian: {time_to_stop}")
             self.time_pedestrian_detected = -1
 
-            pedestrian_brake_state = "PICKING_UP"
-            self.pub_pedestrian_state.publish(String(data = pedestrian_brake_state))
-
-            self.has_picked_up_pedestrian = True
+            self.pub_transition.publish(String(data = "PICKING_UP"))
             
-            # self.brake_cmd.f64_cmd = 1.0 # Max braking
-            # self.accel_cmd.f64_cmd = 0.0
-
-            # self.pub_speed_command.publish(self.accel_cmd)
-            # self.pub_brake_command.publish(self.brake_cmd)  
-        else:
-            pedestrian_brake_state = "SEARCHING"
-            self.pub_pedestrian_state.publish(String(data = pedestrian_brake_state))
-            
-            # @TODO: Implement stop until keyboard input for now, then give back control (maybe DFA?)
-            
-            
-        # else: do nothing, other controllers remain in charge
+        # else: do nothing, we remain in the same state as before
 
 
     ###############################################################################
@@ -438,7 +420,7 @@ class PedestrianDetector:
                     
                     # Control vehicle speed based on mean distance to pedestrian
                     if mean_depth is not None:
-                        self.control_vehicle_for_pedestrian(mean_depth) 
+                        self.transition_vehicle_for_pedestrian(mean_depth) 
                     
                     self.process_pedestrian_gnss(x_cam, z_cam)
                     # print(f"Pedestrian at x: {x_cam:.2f}m, mean depth: {mean_depth:.2f}m")

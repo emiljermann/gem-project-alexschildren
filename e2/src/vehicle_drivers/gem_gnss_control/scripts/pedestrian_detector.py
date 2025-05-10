@@ -126,8 +126,6 @@ class PedestrianDetector:
 
         self.lon = None
         self.lat = None
-
-        self.time_pedestrian_detected = -1
         
         ###############################################################################
         # ROS Communication Setup
@@ -158,32 +156,6 @@ class PedestrianDetector:
         self.pub_depth = rospy.Publisher("pedestrian_detection/avg_depth", Float32MultiArray, queue_size=1)
         self.pub_pedestrian_gnss = rospy.Publisher("pedestrian_detector/gnss", Float64MultiArray)
 
-        # ###############################################################################
-        # # Controller Initialization
-        # ###############################################################################
-        self.pub_speed_command = rospy.Publisher("/pacmod/as_rx/accel_cmd", PacmodCmd, queue_size=1)
-        self.pub_brake_command = rospy.Publisher("/pacmod/as_rx/brake_cmd", PacmodCmd, queue_size=1)
-        # self.pedestrian_proximity_threshold = 5.0  # meters
-        # self.slowing_threshold = 10.0  # meters
-        # self.normal_speed = 0.3  # normal throttle value
-        # self.is_slowing_for_pedestrian = False
-        # self.min_stop_duration = 3.0  # seconds
-        # self.stop_timer = None
-
-        # GEM vehilce brake control
-        self.brake_pub = rospy.Publisher('/pacmod/as_rx/brake_cmd', PacmodCmd, queue_size=1)
-        self.brake_cmd = PacmodCmd()
-        self.brake_cmd.enable = False
-        self.brake_cmd.clear  = True
-        self.brake_cmd.ignore = True
-
-        # GEM vechile forward motion control
-        self.accel_pub = rospy.Publisher('/pacmod/as_rx/accel_cmd', PacmodCmd, queue_size=1)
-        self.accel_cmd = PacmodCmd()
-        self.accel_cmd.enable = False
-        self.accel_cmd.clear  = True
-        self.accel_cmd.ignore = True
-
         self.last_save_time = rospy.Time.now()
 
     def set_state(self, msg):
@@ -192,6 +164,29 @@ class PedestrianDetector:
     ###############################################################################
     # Pedestrian GNSS Localization
     ###############################################################################
+
+    def plot_depths_distribution(self, depth_vals, rgb_img):
+        now = rospy.Time.now()
+
+        if (now - self.last_save_time).to_sec() >= 1.0:
+            dt = datetime.datetime.fromtimestamp(now.to_sec())
+            timestamp = dt.strftime("%Y-%m-%d_%H-%M-%S")
+
+            fig, axs = plt.subplots(1, 2, figsize=(10, 4), tight_layout=True)
+
+            # Plot depth on the left
+            axs[0].hist(depth_vals, bins=40)
+            axs[0].set_title("Depth Histogram")
+
+            # Show rgb_img on the right
+            axs[1].imshow(cv2.cvtColor(rgb_img, cv2.COLOR_BGR2RGB))
+            axs[1].set_title("Camera Image")
+            axs[1].axis('off')  # Hide axis for image
+
+            fig.savefig(f"{timestamp}_combined.png")
+            plt.close(fig)
+
+            self.last_save_time = now
 
     def gnss_callback(self, gnss_msg, ins_msg):
         self.lat     = gnss_msg.latitude  # latitude
@@ -321,32 +316,11 @@ class PedestrianDetector:
         # Only act when we have a valid measurement
         if pedestrian_distance is None or not np.isfinite(pedestrian_distance):
             return
-        
-        if self.pacmod_enable:
-            # enable brake
-            self.brake_cmd.enable  = True
-            self.brake_cmd.clear   = False
-            self.brake_cmd.ignore  = False
-            self.brake_cmd.f64_cmd = 0.0
-
-            # enable gas 
-            self.accel_cmd.enable  = True
-            self.accel_cmd.clear   = False
-            self.accel_cmd.ignore  = False
-            self.accel_cmd.f64_cmd = 0.0
 
         # Request stop if pedestrian detected within 5m 
         if pedestrian_distance <= 5.0:
-            rospy.loginfo(f"Pedestrian within 5m ({pedestrian_distance:.2f} m) – applying hard brake")
-
-            time_to_stop = rospy.Time.now() - self.time_pedestrian_detected
-            rospy.loginfo(f"Time to stop for pedestrian: {time_to_stop}")
-            self.time_pedestrian_detected = -1
-
             self.pub_transition.publish(String(data = "PICKING_UP"))
-            
-        # else: do nothing, we remain in the same state as before
-
+    
 
     ###############################################################################
     # Pedestrian Detection and Depth Perception Helper Functions
@@ -398,123 +372,64 @@ class PedestrianDetector:
         
         return img, ratio, (dw, dh)
     
-    def get_pedestrian_box(self, model, frame):
-        """
-        Gets pose points from a given YOLO model and image frame.
-        Returns:
-            bounding_box: bounding box of person with highest confidence, None otherwise
-                          in format (top-left-x, top-left-y, bottom-right-x, bottom-right-y)
-            confidence: confidence score that said pedestrian exists
-        """
+    def get_pedestrian_boxes(self, model, frame):
         with torch.no_grad():
             result = model(frame).pandas().xyxy[0]
 
-        if len(result) == 0:
-            return None, 0
-        
-        box_coords = None
-        highest_conf = 0
+        boxes = []
         for obj in result.itertuples():
             if obj.name == "person":
-                boxes = (obj.xmin, obj.ymin, obj.xmax, obj.ymax)
-                confidence = obj.confidence
-                if confidence > highest_conf:
-                    if self.time_pedestrian_detected == -1:
-                        self.time_pedestrian_detected = rospy.Time.now()
-                    highest_conf = confidence
-                    box_coords = boxes
-                    highest_conf = confidence
-                break
+                boxes.append(((obj.xmin, obj.ymin, obj.xmax, obj.ymax), obj.confidence))
+        return boxes
 
-        return box_coords, highest_conf 
-    
-    def process_pedestrian_box(self, box_coords, conf, pad, ratio, rgb_img, depth_img):
-        if not box_coords or conf <= self.Conf_Threshold:
-            return None, None, None, None, False
+    def process_all_pedestrian_boxes(self, boxes, pad, ratio, rgb_img, depth_img):
+        best = None  # (box, mean_depth, hand_raised, x_cam, z_cam)
 
-        x1, y1, x2, y2 = box_coords
-        x1 = int((x1 - pad[0]) / ratio[0])
-        y1 = int((y1 - pad[1]) / ratio[1])
-        x2 = int((x2 - pad[0]) / ratio[0])
-        y2 = int((y2 - pad[1]) / ratio[1])
+        for box_coords, conf in boxes:
+            if conf < self.Conf_Threshold:
+                continue
 
-        self.pub_bounding_box.publish(Float32MultiArray(data=[x1, y1, x2, y2]))
+            # Unpack and unletterbox
+            x1, y1, x2, y2 = box_coords
+            x1 = int((x1 - pad[0]) / ratio[0])
+            y1 = int((y1 - pad[1]) / ratio[1])
+            x2 = int((x2 - pad[0]) / ratio[0])
+            y2 = int((y2 - pad[1]) / ratio[1])
 
-        cropped = rgb_img[y1:y2, x1:x2]
-        hand_raised, pose_debug_img = self.is_hand_raised(cropped, return_debug_img=True)
+            cropped = rgb_img[y1:y2, x1:x2]
+            hand_raised, pose_debug_img = self.is_hand_raised(cropped, return_debug_img=False)
 
-        depth_roi = depth_img[y1:y2, x1:x2]
-        valid = depth_roi[np.isfinite(depth_roi) & (depth_roi > 0)]
-        if valid.size == 0:
-            return (x1, y1, x2, y2), None, None, None, hand_raised
+            # Depth filtering
+            depth_roi = depth_img[y1:y2, x1:x2]
+            valid_depths = depth_roi[np.isfinite(depth_roi) & (depth_roi > 0)]
+            mean, med, std = None, None, None
+            x_cam, z_cam = None, None
 
-        q1 = np.quantile(valid, 0.25)
-        filtered = valid[valid <= q1]
-        if filtered.size == 0:
-            return (x1, y1, x2, y2), None, None, None, hand_raised
+            if valid_depths.size > 0:
+                q1 = np.quantile(valid_depths, 0.25)
+                filtered = valid_depths[valid_depths <= q1]
+                if filtered.size > 0:
+                    mean = np.mean(filtered)
+                    med = np.median(filtered)
+                    std = np.std(filtered)
 
-        mean = np.mean(filtered)
-        med = np.median(filtered)
-        std = np.std(filtered)
+                    u = (x1 + x2) // 2
+                    cx = rgb_img.shape[1] / 2
+                    x_cam = (u - cx) * mean / self.Focal_Length
+                    z_cam = math.sqrt(mean**2 - x_cam**2)
 
-        if hand_raised:
-            u = (x1 + x2) // 2
-            cx = rgb_img.shape[1] / 2
-            x_cam = (u - cx) * mean / self.Focal_Length
-            z_cam = math.sqrt(mean**2 - x_cam**2)
+            # Color logic
+            color = (0, 255, 0) if hand_raised and (best is None or (mean and mean < best[1])) else \
+                    (255, 0, 0) if hand_raised else (0, 0, 255)
 
-            self.transition_vehicle_for_pedestrian(mean)
-            self.process_pedestrian_gnss(x_cam, z_cam)
+            if mean and hand_raised and (best is None or mean < best[1]):
+                best = ((x1, y1, x2, y2), mean, hand_raised, x_cam, z_cam)
 
-        return (x1, y1, x2, y2), mean, med, std, hand_raised, pose_debug_img
+            label = "HAND RAISED" if hand_raised else "Person"
+            cv2.rectangle(rgb_img, (x1, y1), (x2, y2), color, 2)
+            cv2.putText(rgb_img, label, (x1, y1 - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 1)
 
-
-    def annotate_pedestrian(self, rgb_img, box, pad, ratio, mean_depth, med_depth, hand_raised):
-        x1, y1, x2, y2 = box
-        # No need to un-pad again since we already did in process_pedestrian_box
-        color = (0, 255, 0) if hand_raised else (0, 0, 255)  # green = yes, red = no
-        label = "Hand Raised" if hand_raised else "Pedestrian Detected"
-
-        cv2.rectangle(rgb_img, (x1, y1), (x2, y2), color, 2)
-        cv2.putText(rgb_img, label, (x1, y1 - 20), cv2.FONT_HERSHEY_SIMPLEX, 0.6, color, 2)
-
-        if mean_depth and med_depth:
-            cv2.putText(rgb_img, f"Mean: {mean_depth:.2f}m | Med: {med_depth:.2f}m", (x1, y1 - 40), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 0, 0), 2)
-
-        # Center point
-        chest_y = (3*y1 + y2) // 4
-        u = (x1 + x2) // 2
-        cv2.circle(rgb_img, (u, chest_y), 4, (255, 255, 0), -1)
-
-        return rgb_img
-
-    ###############################################################################
-    # Debugging Helper Functions
-    ###############################################################################    
-    
-    def plot_depths_distribution(self, depth_vals, rgb_img):
-        now = rospy.Time.now()
-
-        if (now - self.last_save_time).to_sec() >= 1.0:
-            dt = datetime.datetime.fromtimestamp(now.to_sec())
-            timestamp = dt.strftime("%Y-%m-%d_%H-%M-%S")
-
-            fig, axs = plt.subplots(1, 2, figsize=(10, 4), tight_layout=True)
-
-            # Plot depth on the left
-            axs[0].hist(depth_vals, bins=40)
-            axs[0].set_title("Depth Histogram")
-
-            # Show rgb_img on the right
-            axs[1].imshow(cv2.cvtColor(rgb_img, cv2.COLOR_BGR2RGB))
-            axs[1].set_title("Camera Image")
-            axs[1].axis('off')  # Hide axis for image
-
-            fig.savefig(f"{timestamp}_combined.png")
-            plt.close(fig)
-
-            self.last_save_time = now
-        
+        return rgb_img, best
 
     ###############################################################################
     # Pedestrian Perception Callback
@@ -526,27 +441,23 @@ class PedestrianDetector:
             depth_img = self.bridge.imgmsg_to_cv2(depth_img_msg, "32FC1")
 
             resized_img, ratio, pad = self.letterbox(rgb_img)
-            box_coords, conf = self.get_pedestrian_box(self.pedestrian_model, resized_img)
+            boxes = self.get_pedestrian_boxes(self.pedestrian_model, resized_img)
 
-            box, avg, med, std, hand_raised, pose_debug_img = self.process_pedestrian_box(box_coords, conf, pad, ratio, rgb_img, depth_img)
+            rgb_img, best_pedestrian = self.process_all_pedestrian_boxes(boxes, pad, ratio, rgb_img, depth_img)
 
-            if box:
-                rgb_img = self.annotate_pedestrian(rgb_img, box, pad, ratio, avg, med, hand_raised)
-            
-            if pose_debug_img is not None:
-                h, w = pose_debug_img.shape[:2]
-                scale = 0.3
-                pose_debug_img = cv2.resize(pose_debug_img, (int(w * scale), int(h * scale)))
+            if best_pedestrian:
+                (x1, y1, x2, y2), mean, hand_raised, x_cam, z_cam = best_pedestrian
 
-                # Put it in the top-left of the main image
-                h_debug, w_debug = pose_debug_img.shape[:2]
-                rgb_img[0:h_debug, 0:w_debug] = pose_debug_img
+                # Publish data for the selected pedestrian
+                self.pub_bounding_box.publish(Float32MultiArray(data=[x1, y1, x2, y2]))
+                self.transition_vehicle_for_pedestrian(mean)
+                self.process_pedestrian_gnss(x_cam, z_cam)
+                self.pub_depth.publish(Float32MultiArray(data=[mean, mean, 0.0]))  # std not tracked here
+            else:
+                self.pub_depth.publish(Float32MultiArray(data=[None, None, None]))
 
-            # Always publish image
             ros_rgb = self.bridge.cv2_to_imgmsg(rgb_img, "bgr8")
             self.pub_rgb_pedestrian_image.publish(ros_rgb)
-
-            self.pub_depth.publish(Float32MultiArray(data=[avg, med, std]))
 
         except CvBridgeError as e:
             rospy.logerr(e)

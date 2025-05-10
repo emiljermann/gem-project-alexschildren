@@ -6,6 +6,8 @@ e2/build/
 *.pt
 *.jpg
 *.mp4
+*.png
+*.gif
 
 # pycache
 __pycache__/

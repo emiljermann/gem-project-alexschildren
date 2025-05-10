@@ -161,7 +161,7 @@ class PurePursuit(object):
         self.frame_count = 0
     
     def update_plot(self, curr_x, curr_y, curr_h, goal_x, goal_y, goal_h):
-        time = time.time() - self.start_time
+        t = time.time() - self.start_time
 
         arrow_len = 2
         self.path_plot.set_data(self.path_points_x, self.path_points_y)
@@ -189,7 +189,7 @@ class PurePursuit(object):
 
         fname = f"frames/frame_{self.frame_count:04d}.png"
         self.fig.savefig(fname)
-        self.time_stamps.append(time)
+        self.time_stamps.append(t)
 
         self.fig.canvas.flush_events()
         self.frame_count += 1
@@ -629,6 +629,7 @@ def pure_pursuit():
             avg_fps = 10  # fallback
 
         create_mp4_from_frames(folder="frames", output="map_video.mp4", fps=round(avg_fps))
+        delete_frames(folder = "folder")
 
 def create_mp4_from_frames(folder="frames", output="map_video.mp4", fps=10):
     command = [
@@ -645,6 +646,10 @@ def create_mp4_from_frames(folder="frames", output="map_video.mp4", fps=10):
         print(f"MP4 video saved as {output}")
     except subprocess.CalledProcessError as e:
         print("FFmpeg failed:", e)
+def delete_frames(folder="frames"):
+    for filename in os.listdir(folder):
+        os.remove(os.path.join(folder, filename))
+    print(f"Deleted all frames in {folder}")
 
 if __name__ == '__main__':
     pure_pursuit()

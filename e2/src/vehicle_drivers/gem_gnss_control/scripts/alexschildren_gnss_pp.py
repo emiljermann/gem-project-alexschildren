@@ -581,7 +581,7 @@ class PurePursuit(object):
                 # self.state = "SEARCHING" #Similar deal here to DROPPING_OFF, anytime we wait need to run only once
                 self.pub_transition.publish(String(data="SEARCHING"))  # Release override
             elif self.state == "SEARCHING" and self.gem_enable:
-                self.pp_iter()
+                self.start_pp()
                 if self.stop_wp_index is not None:
                     if (self._last_logged_dist_to_stop is None or
                         abs(dist_to_stop - self._last_logged_dist_to_stop) >= self._log_dist_threshold):

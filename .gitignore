@@ -4,3 +4,9 @@ e2/build/
 
 # model weight files
 *.pt
+
+# pycache
+__pycache__/
+
+# scratch work
+experiments.ipynb

@@ -46,11 +46,17 @@ class PurePursuit(object):
 
         self.rate       = rospy.Rate(10)
 
-        self.look_ahead = 2.5
+        self.look_ahead = 7
         self.wheelbase  = 1.75 # meters
         self.offset     = 0.46 # meters
 
 
+        # state management
+        self.state = ""
+        self.sub_state = rospy.Subscriber("/state_manager_node/state", String, self.set_state)
+        self.pub_transition = rospy.Publisher("state_manager_node/transition", String, queue_size=1)
+        
+        
         # we replaced novatel hardware with septentrio hardware on e2
         self.gnss_sub   = rospy.Subscriber("/septentrio_gnss/navsatfix", NavSatFix, self.gnss_callback)
         self.ins_sub    = rospy.Subscriber("/septentrio_gnss/insnavgeod", INSNavGeod, self.ins_callback)
@@ -65,21 +71,20 @@ class PurePursuit(object):
 
         self.olat       = 40.0928563
         self.olon       = -88.2359994
-
-        self.pedestrian_state = None
-        self.sub_pedestrian_state = rospy.Subscriber("pedestrian_detector/state", String, self.state_callback)
+        
         self.sub_pedestrian_gnss = rospy.Subscriber("pedestrian_detector/gnss", Float64MultiArray, self.pedestrian_gnss_callback)
         self.pedestrian_lat = None
         self.pedestrian_lon = None
 
-        self.pub_state_override = rospy.Publisher("pedestrian_detector/state_override", String, queue_size=1)
         
         # read waypoints into the system 
-        self.goal       = 0            
+        self.goal       = 0  
+        self.poly = None
+        self.polyfit_yaw = None          
         self.read_waypoints() 
 
         self.desired_speed = 1.0  # m/s, reference speed
-        self.max_accel     = 0.45 # % of acceleration
+        self.max_accel     = 0.46 # % of acceleration
         self.pid_speed     = PID(0.5, 0.0, 0.1, wg=20)
         self.speed_filter  = OnlineFilter(1.2, 30, 4)
         self.controller = RawJoystickReader()
@@ -142,7 +147,9 @@ class PurePursuit(object):
         self.curr_pos_plot, = self.ax.plot([], [], 'bo', label='Current Position')
         self.goal_plot, = self.ax.plot([], [], 'ro', label='Goal Point')
         self.pedestrian_plot, = self.ax.plot([], [], 'go', label='Pedestrian Point')
+        self.polyfit_plot, = self.ax.plot([], [], 'r-', label='Polyfit Path')
         self.heading_arrows = self.ax.quiver([0,0], [0,0], [0,0], [0,0], angles='xy', scale_units='xy', scale=1, color='g')
+        self.polyfit_arrow = self.ax.quiver([0], [0], [0], [0], angles='xy', scale_units='xy', scale=1, color='r')
         self.ax.set_xlabel("X (m)")
         self.ax.set_ylabel("Y (m)")
         self.ax.set_title("Pure Pursuit Live Map")
@@ -154,12 +161,21 @@ class PurePursuit(object):
         self.curr_pos_plot.set_data([curr_x], [curr_y])
         self.goal_plot.set_data([goal_x], [goal_y])
 
+        self.heading_arrows.set_UVC([arrow_len*np.cos(curr_h), arrow_len*np.cos(goal_h)], 
+                                     [arrow_len*np.sin(curr_h), arrow_len*np.sin(goal_h)])
+        self.heading_arrows.set_offsets(np.array([[curr_x, curr_y], [goal_x, goal_y]]))
         if self.pedestrian_lat and self.pedestrian_lon:
             local_x, local_y = self.wps_to_local_xy(self.pedestrian_lon, self.pedestrian_lat)
             self.pedestrian_plot.set_data([local_x], [local_y])
 
-        self.heading_arrows.set_UVC([arrow_len*np.cos(curr_h), arrow_len*np.cos(goal_h)], [arrow_len*np.sin(curr_h), arrow_len*np.sin(goal_h)])
-        self.heading_arrows.set_offsets(np.array([[curr_x, curr_y], [goal_x, goal_y]]))
+        if self.poly is not None:
+            x_polyfit = np.linspace(curr_x - 5, curr_x + 5, 100)
+            y_polyfit = self.poly(x_polyfit)
+            self.polyfit_plot.set_data(x_polyfit, y_polyfit)
+            self.polyfit_arrow.set_UVC([arrow_len*np.cos(self.polyfit_yaw)], 
+                                     [arrow_len*np.sin(self.polyfit_yaw)])
+            self.polyfit_arrow.set_offsets(np.array([[curr_x, curr_y]]))
+
         self.ax.set_xlim(curr_x - 10, curr_x + 10)
         self.ax.set_ylim(curr_y - 10, curr_y + 10)
         self.fig.canvas.draw()
@@ -175,9 +191,10 @@ class PurePursuit(object):
     def gnss_callback(self, msg):
         self.lat = round(msg.latitude, 6)
         self.lon = round(msg.longitude, 6)
-
-    def state_callback(self, msg):
-        self.pedestrian_state = msg.data
+        
+        
+    def set_state(self, msg):
+        self.state = msg.data
 
     def speed_callback(self, msg):
         self.speed = round(msg.vehicle_speed, 3) # forward velocity in m/s
@@ -361,18 +378,108 @@ class PurePursuit(object):
                     # estimated_time_to_stop_point = self.estimate_drive_time_to_stop_point_birds_eye()
                     rospy.loginfo(f"Estimated time to dropoff pedestrian: {estimated_time_to_stop_point}")
                     self.pub_pickup_time.publish(Float32(estimated_time_to_stop_point))
-
-                    self.pub_state_override.publish(String(data="DROPPING_OFF"))
-                    self.pedestrian_state = "DROPPING_OFF" # could easily get overriden by pedestrian_detection.py if it sees another pedestrian
-                    self.resume_motion()
                     break
                 else:
                     print("Invalid choice. Please enter 1, 2, or 3.")
             except ValueError:
                 print("Please enter a valid number.")
 
+    def handle_dropoff(self):
+        self._apply_brakes()
+        # would be cool if it could conclude pedestrian has left the vehicle autonomously but we'll just wait 20 seconds for now
+        for _ in range(20):
+            if rospy.is_shutdown():
+                return
+            rospy.sleep(1)
+        self.stop_wp_index = None
+        self._last_logged_dist_to_stop = None
+        self.closest_wp_index = None
+        
+    def pp_iter(self):
+        curr_x, curr_y, curr_yaw = self.get_gem_state()
+        #Polyfit to the next few points and the original
+        num_points = 20
+        jump = 1
+        degree = 2
+        point_idx = np.arange(self.goal, self.goal+num_points*jump, jump)%self.wp_size
+        points_x = self.path_points_x[point_idx]
+        points_y = self.path_points_y[point_idx]
+        points_x = np.insert(points_x, 0, curr_x)
+        points_y = np.insert(points_y, 0, curr_y)
+        coeffs = np.polyfit(points_x, points_y, degree)
+        poly = np.poly1d(coeffs)
+        px = (curr_x+self.path_points_x[self.goal])/2.0
+        self.polyfit_yaw = math.atan(poly.deriv()(px))
+        
+        v1 = [math.cos(curr_yaw), math.sin(curr_yaw)]
+        v2 = [math.cos(self.polyfit_yaw), math.sin(self.polyfit_yaw)]
+        if np.dot(v1, v2) < 0:
+            self.polyfit_yaw += np.pi
+        self.poly = poly
+        
+        L = self.dist_arr[self.goal]
+        L = max(L, 0.1)
+        
+        #@TODO: may need to be tuned to work with orientation
+        # self.polyfit_yaw = self.heading_to_yaw(np.degrees(self.polyfit_yaw))
+        # alpha = self.polyfit_yaw - curr_yaw
+        dx = self.path_points_x[self.goal] - curr_x
+        dy = self.path_points_y[self.goal] - curr_y
+        alpha = math.atan2(dy, dx) - curr_yaw
+        
+        # ----------------- tuning this part as needed -----------------
+        k = 1.8
+        angle_i = (k * 2.0 * math.sin(alpha)) / L
+        # ----------------- tuning this part as needed -----------------
+        f_delta = math.atan(self.wheelbase * angle_i)
+        f_delta = round(np.clip(f_delta, -0.61, 0.61), 3)
 
+        f_delta_deg = np.degrees(f_delta)
+
+        # steering_angle in degrees
+        steering_angle = self.front2steer(f_delta_deg)
+        
+        if(self.gem_enable == True):
+            print("Current index: " + str(self.goal))
+            print("Forward velocity: " + str(self.speed))
+            ct_error = round(np.sin(alpha) * L, 3)
+            print("Crosstrack Error: " + str(ct_error))
+            print("Front steering angle: " + str(np.degrees(f_delta)) + " degrees")
+            print("Steering wheel angle: " + str(steering_angle) + " degrees" )
+            print(f"Ignored: {self.brake_cmd.ignore}, {self.accel_cmd.ignore}")
+            print("\n")
+        
+        # if abs(np.degrees(f_delta)) > 20:
+        #     self.desired_speed = 1.1
+        # else:
+        #     self.desired_speed = 1.5
+
+        current_time = rospy.get_time()
+        filt_vel     = self.speed_filter.get_data(self.speed)
+        output_accel = self.pid_speed.get_control(current_time, self.desired_speed - filt_vel)
+
+        if output_accel > self.max_accel:
+            output_accel = self.max_accel
+
+        if output_accel < 0.31:
+            output_accel = 0.31
+
+        if (f_delta_deg <= 30 and f_delta_deg >= -30):
+            self.turn_cmd.ui16_cmd = 1
+        elif(f_delta_deg > 30):
+            self.turn_cmd.ui16_cmd = 2 # turn left
+        else:
+            self.turn_cmd.ui16_cmd = 0 # turn right
+
+        self.accel_cmd.f64_cmd = output_accel
+        self.steer_cmd.angular_position = np.radians(steering_angle)
+        self.accel_pub.publish(self.accel_cmd)
+        self.steer_pub.publish(self.steer_cmd)
+        self.turn_pub.publish(self.turn_cmd)
+        
+        
     def start_pp(self):
+        self.pub_transition.publish(String(data = "BOOT"))
         
         while not rospy.is_shutdown():
 
@@ -419,113 +526,58 @@ class PurePursuit(object):
             for i in range(len(self.path_points_x)):
                 self.dist_arr[i] = self.dist((self.path_points_x[i], self.path_points_y[i]), (curr_x, curr_y))
 
-        
-            # -----------------------------------STATE CODE BEGINS------------------------------------------------------------------
-            # State tracking, FULL BRAKE when picking up, wait for user input to set state to DROPPING_OFF
-            # if (self.pedestrian_state == "SEARCHING" and self.gem_enable):
-            #     # do something
-            # #el
-            if (self.pedestrian_state == "PICKING_UP" and self.gem_enable):
-                self.handle_pickup() # brakes, waits for user input, unbrakes and sets state to "DROPPING_OFF"
-            elif self.pedestrian_state == "DROPPING_OFF" and self.stop_wp_index is not None:
-                stop_x = self.path_points_x[self.stop_wp_index]
-                stop_y = self.path_points_y[self.stop_wp_index]
-                dist_to_stop = self.dist((curr_x, curr_y), (stop_x, stop_y))
-
-                if dist_to_stop <= self.stop_dist:
-                    rospy.loginfo("Reached stop waypoint %d  (%.2f m away) - braking", self.stop_wp_index, dist_to_stop)
-                    self._apply_brakes()
-                    # would be cool if it could conclude pedestrian has left the vehicle autonomously but we'll just wait 20 seconds for now
-                    for _ in range(20):
-                        if rospy.is_shutdown():
-                            return
-                        rospy.sleep(1)
-                    self.pub_state_override.publish(String(data="SEARCHING"))  # Release override
-                    self.stop_wp_index = None
-                    self._last_logged_dist_to_stop = None
-                    self.closest_wp_index = None
-                    self.resume_motion()
-                else: # just for clean printing, dw about this
-                    if (self._last_logged_dist_to_stop is None or
-                        abs(dist_to_stop - self._last_logged_dist_to_stop) >= self._log_dist_threshold):
-                        rospy.loginfo("Not at stop waypoint %d  (still %.2f m away) - continuing", self.stop_wp_index, dist_to_stop)
-                        self._last_logged_dist_to_stop = dist_to_stop
-
-            # -----------------------------------STATE CODE ENDS------------------------------------------------------------------
-
-
             # finding those points which are less than the look ahead distance (will be behind and ahead of the vehicle)
             goal_arr = np.where( (self.dist_arr < self.look_ahead + 0.3) & (self.dist_arr > self.look_ahead - 0.3) )[0]
-            self.goal  = self.closest_wp_index
+
             # finding the goal point which is the last in the set of points less than the lookahead distance
             for idx in goal_arr:
                 v1 = [self.path_points_x[idx]-curr_x, self.path_points_y[idx]-curr_y]
                 v2 = [math.cos(curr_yaw), math.sin(curr_yaw)]
                 if np.dot(v1, v2) > 0:
-                    self.goal = idx
-                    break
-            if self.goal + 1 < len(self.path_points_x):
-                goal2 = self.goal + 1
+                    #@TODO: check if the goal point is in front of the vehicle
+                    v3 = [math.cos(self.path_points_heading[idx]), math.sin(self.path_points_heading[idx])]
+                    if np.dot(v2, v3) > 0:
+                        self.goal = idx
+                        # break
+        
+            if self.stop_wp_index is not None:
+                stop_x = self.path_points_x[self.stop_wp_index]
+                stop_y = self.path_points_y[self.stop_wp_index]
+                dist_to_stop = self.dist((curr_x, curr_y), (stop_x, stop_y))
+            # -----------------------------------STATE CODE BEGINS------------------------------------------------------------------
+            if self.state=="PICKING_UP" and self.gem_enable:
+                self.handle_pickup() # brakes, waits for user input, unbrakes
+                # request state change to DROPPING_OFF (note since the pickup process is asynchronous we want to transition internally to avoid race condition execution repeats)
+                self.resume_motion()
+                # self.state = "DROPPING_OFF"
+                self.pub_transition.publish(String(data="DROPPING_OFF"))
+            elif self.state == "DROPPING_OFF" and self.gem_enable:
+                self.pp_iter()
+                stop_x = self.path_points_x[self.stop_wp_index]
+                stop_y = self.path_points_y[self.stop_wp_index]
+                dist_to_stop = self.dist((curr_x, curr_y), (stop_x, stop_y))
+
+                if dist_to_stop <= self.stop_dist:
+                    # transition to let ped out state if close enough to desired waypoint
+                    self.pub_transition.publish(String(data="DROPOFF_END"))
+            elif self.state == "DROPOFF_END" and self.gem_enable:
+                rospy.loginfo("Reached stop waypoint %d  (%.2f m away) - braking", self.stop_wp_index, dist_to_stop)
+                self.handle_dropoff() # brakes, waits 20 seconds, unbrakes
+                self.resume_motion()
+                # self.state = "SEARCHING" #Similar deal here to DROPPING_OFF, anytime we wait need to run only once
+                self.pub_transition.publish(String(data="SEARCHING"))  # Release override
+            elif self.state == "SEARCHING" and self.gem_enable:
+                self.pp_iter()
+                if self.stop_wp_index is not None:
+                    if (self._last_logged_dist_to_stop is None or
+                        abs(dist_to_stop - self._last_logged_dist_to_stop) >= self._log_dist_threshold):
+                        rospy.loginfo("Not at stop waypoint %d (still %.2f m away) - continuing", 
+                                    self.stop_wp_index, dist_to_stop)
+                        self._last_logged_dist_to_stop = dist_to_stop
             else:
-                goal2 = len(self.path_points_x) - 1
-            
-            
-            L = self.dist_arr[self.goal]
-            L = max(L, 0.1)
-            
-            dx = self.path_points_x[goal2] - self.path_points_x[self.goal]
-            dy = self.path_points_y[goal2] - self.path_points_y[self.goal]
-            alpha = math.atan2(dy, dx) - curr_yaw
-            alpha = math.atan2(math.sin(alpha), math.cos(alpha))
-
-            # ----------------- tuning this part as needed -----------------
-            k = 0.41
-            angle_i = (k * 2.0 * math.sin(alpha)) / L
-            # ----------------- tuning this part as needed -----------------
-            f_delta = math.atan(self.wheelbase * angle_i)
-            f_delta = round(np.clip(f_delta, -0.61, 0.61), 3)
-
-            f_delta_deg = np.degrees(f_delta)
-
-            # steering_angle in degrees
-            steering_angle = self.front2steer(f_delta_deg)
-            
-            # CHANGED CODE END
-
-
-            if(self.gem_enable == True):
-                print("Current index: " + str(self.goal))
-                print("Forward velocity: " + str(self.speed))
-                ct_error = round(np.sin(alpha) * L, 3)
-                print("Crosstrack Error: " + str(ct_error))
-                print("Front steering angle: " + str(np.degrees(f_delta)) + " degrees")
-                print("Steering wheel angle: " + str(steering_angle) + " degrees" )
-                print(f"Ignored: {self.brake_cmd.ignore}, {self.accel_cmd.ignore}")
-                print("\n")
-
-            current_time = rospy.get_time()
-            filt_vel     = self.speed_filter.get_data(self.speed)
-            output_accel = self.pid_speed.get_control(current_time, self.desired_speed - filt_vel)
-
-            if output_accel > self.max_accel:
-                output_accel = self.max_accel
-
-            if output_accel < 0.3:
-                output_accel = 0.3
-
-            if (f_delta_deg <= 30 and f_delta_deg >= -30):
-                self.turn_cmd.ui16_cmd = 1
-            elif(f_delta_deg > 30):
-                self.turn_cmd.ui16_cmd = 2 # turn left
-            else:
-                self.turn_cmd.ui16_cmd = 0 # turn right
-
-            self.accel_cmd.f64_cmd = output_accel
-            self.steer_cmd.angular_position = np.radians(steering_angle)
-            self.accel_pub.publish(self.accel_cmd)
-            self.steer_pub.publish(self.steer_cmd)
-            self.turn_pub.publish(self.turn_cmd)
-            
+                rospy.loginfo("Shoot, something broke!!")
+            # -----------------------------------STATE CODE ENDS------------------------------------------------------------------
+           
             goal_x = self.path_points_x[self.goal]
             goal_y = self.path_points_y[self.goal]
             goal_heading = self.path_points_heading[self.goal]

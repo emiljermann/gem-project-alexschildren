@@ -159,7 +159,7 @@ class PurePursuit(object):
         self.time_stamps = list()
         self.start_time = time.time()
         self.frame_count = 0
-        self.make_vid = False
+        self.save_vid = False
     
     def update_plot(self, curr_x, curr_y, curr_h, goal_x, goal_y, goal_h):
 

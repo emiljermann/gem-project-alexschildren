@@ -566,7 +566,7 @@ class PurePursuit(object):
                 # self.state = "DROPPING_OFF"
                 self.pub_transition.publish(String(data="DROPPING_OFF"))
             elif self.state == "DROPPING_OFF" and self.gem_enable:
-                self.start_pp()
+                self.pp_iter()
                 stop_x = self.path_points_x[self.stop_wp_index]
                 stop_y = self.path_points_y[self.stop_wp_index]
                 dist_to_stop = self.dist((curr_x, curr_y), (stop_x, stop_y))
@@ -581,7 +581,7 @@ class PurePursuit(object):
                 # self.state = "SEARCHING" #Similar deal here to DROPPING_OFF, anytime we wait need to run only once
                 self.pub_transition.publish(String(data="SEARCHING"))  # Release override
             elif self.state == "SEARCHING" and self.gem_enable:
-                self.start_pp()
+                self.pp_iter()
                 if self.stop_wp_index is not None:
                     if (self._last_logged_dist_to_stop is None or
                         abs(dist_to_stop - self._last_logged_dist_to_stop) >= self._log_dist_threshold):

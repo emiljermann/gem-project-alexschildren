@@ -231,21 +231,23 @@ class PedestrianDetector:
         lat, lon = axy.xy2ll(local_x, local_y, self.olat, self.olon)
         return lat, lon
     
-    def is_hand_raised(self, cropped_img):
+    def is_hand_raised(self, cropped_img, return_debug_img=False):
         now = time.time()
         if now - self.last_pose_time < self.pose_throttle_interval:
             rospy.loginfo("Skipping pose estimation due to throttle")
-            return False
+            return False, None
 
+        debug_img = cropped_img.copy() if return_debug_img else None
+        cropped_height, cropped_width = cropped_img.shape[:2]
         rgb = cv2.cvtColor(cropped_img, cv2.COLOR_BGR2RGB)
-        cropped_height, cropped_width, channels = cropped_img.shape
         results = self.pose.process(rgb)
+
         if not results.pose_landmarks:
-            return False
+            return False, debug_img
 
         landmarks = results.pose_landmarks.landmark
 
-        # Left and right wrist and shoulder indices
+        # Get key landmarks
         left_wrist = landmarks[15]
         left_shoulder = landmarks[11]
         left_hip = landmarks[23]
@@ -254,16 +256,33 @@ class PedestrianDetector:
         right_hip = landmarks[24]
         nose = landmarks[0]
 
-        # Visibility threshold check
+        # Visibility check
         left_valid = left_wrist.visibility > 0.5 and left_shoulder.visibility > 0.5
         right_valid = right_wrist.visibility > 0.5 and right_shoulder.visibility > 0.5
 
-        # I want to make it so that wrist is only detected within a certain y range (upper half hip to nose)
-        # and that it's only detected past a certain x threshold (currently the outer quarters of the image)
-        left_hand_raised = left_valid and left_wrist.y > nose.y and left_wrist.y < (nose.y + abs(nose.y - left_hip.y) / 2.0) and (left_wrist.x < cropped_width / 4.0 or left_wrist.x > 3*(cropped_width / 4.0)) 
-        right_hand_raised = right_valid and right_wrist.y > nose.y and right_wrist.y < (nose.y + abs(nose.y - right_hip.y) / 2.0) and (right_wrist.x < cropped_width / 4.0 or right_wrist.x > 3*(cropped_width / 4.0))
+        # Compute hand raise flags
+        left_hand_raised = left_valid and left_wrist.y > nose.y and left_wrist.y < (nose.y + abs(nose.y - left_hip.y) / 2.0) and (left_wrist.x < 0.25 or left_wrist.x > 0.75)
+        right_hand_raised = right_valid and right_wrist.y > nose.y and right_wrist.y < (nose.y + abs(nose.y - right_hip.y) / 2.0) and (right_wrist.x < 0.25 or right_wrist.x > 0.75)
 
-        return left_hand_raised or right_hand_raised
+        # === Debug overlay if requested ===
+        if debug_img is not None:
+            for lm in landmarks:
+                cx = int(lm.x * cropped_width)
+                cy = int(lm.y * cropped_height)
+                cv2.circle(debug_img, (cx, cy), 2, (0, 255, 255), -1)
+
+            # Draw valid regions (blue rectangles)
+            y_min = int(nose.y * cropped_height)
+            y_max_left = int((nose.y + abs(nose.y - left_hip.y) / 2.0) * cropped_height)
+            y_max_right = int((nose.y + abs(nose.y - right_hip.y) / 2.0) * cropped_height)
+            x_left_min, x_left_max = 0, int(0.25 * cropped_width)
+            x_right_min, x_right_max = int(0.75 * cropped_width), cropped_width
+
+            cv2.rectangle(debug_img, (x_left_min, y_min), (x_left_max, y_max_left), (255, 0, 0), 1)
+            cv2.rectangle(debug_img, (x_right_min, y_min), (x_right_max, y_max_right), (255, 0, 0), 1)
+            cv2.putText(debug_img, "POSE DEBUG", (5, 12), cv2.FONT_HERSHEY_SIMPLEX, 0.4, (255, 255, 255), 1)
+
+        return left_hand_raised or right_hand_raised, debug_img
     
     def enable_callback(self, msg):
         self.pacmod_enable = msg.data
@@ -410,84 +429,64 @@ class PedestrianDetector:
         return box_coords, highest_conf 
     
     def process_pedestrian_box(self, box_coords, conf, pad, ratio, rgb_img, depth_img):
+        if not box_coords or conf <= self.Conf_Threshold:
+            return None, None, None, None, False
 
-        mean_depth, med_depth, std_depth = None, None, None
+        x1, y1, x2, y2 = box_coords
+        x1 = int((x1 - pad[0]) / ratio[0])
+        y1 = int((y1 - pad[1]) / ratio[1])
+        x2 = int((x2 - pad[0]) / ratio[0])
+        y2 = int((y2 - pad[1]) / ratio[1])
 
-        if box_coords and conf > self.Conf_Threshold:
+        self.pub_bounding_box.publish(Float32MultiArray(data=[x1, y1, x2, y2]))
 
-            # Draw the bounding box on the image (adjust for padding and ratio)
-            x1, y1, x2, y2 = box_coords
-            # Convert to int and adjust for letterbox padding
-            x1 = int((x1 - pad[0]) / ratio[0])
-            y1 = int((y1 - pad[1]) / ratio[1])
-            x2 = int((x2 - pad[0]) / ratio[0])
-            y2 = int((y2 - pad[1]) / ratio[1])
+        cropped = rgb_img[y1:y2, x1:x2]
+        hand_raised, pose_debug_img = self.is_hand_raised(cropped, return_debug_img=True)
 
-            # Add hand raise detection
-            cropped = rgb_img[y1:y2, x1:x2]
-            hand_raised = self.is_hand_raised(cropped)
-            if not hand_raised:
-                rospy.loginfo("Detected person is not raising hand — skipping pickup")
-                return rgb_img, None, None, None
+        depth_roi = depth_img[y1:y2, x1:x2]
+        valid = depth_roi[np.isfinite(depth_roi) & (depth_roi > 0)]
+        if valid.size == 0:
+            return (x1, y1, x2, y2), None, None, None, hand_raised
 
-            # Publish box coordinate data
-            box_coords_msg = Float32MultiArray()
-            box_coords_msg.data = [x1, y1, x2, y2]
-            self.pub_bounding_box.publish(box_coords_msg)
+        q1 = np.quantile(valid, 0.25)
+        filtered = valid[valid <= q1]
+        if filtered.size == 0:
+            return (x1, y1, x2, y2), None, None, None, hand_raised
 
-            # Get bounding box pixel points
-            chest_y = (3*y1 + y2) // 4
-            chest_delta = 10
+        mean = np.mean(filtered)
+        med = np.median(filtered)
+        std = np.std(filtered)
+
+        if hand_raised:
             u = (x1 + x2) // 2
-            v = (y1 + y2) // 2
+            cx = rgb_img.shape[1] / 2
+            x_cam = (u - cx) * mean / self.Focal_Length
+            z_cam = math.sqrt(mean**2 - x_cam**2)
 
-            # Extract region of interest from the depth image
-            depth_roi = depth_img[y1:y2, x1:x2]
-            valid_depths = depth_roi[np.isfinite(depth_roi) & (depth_roi > 0)]
+            self.transition_vehicle_for_pedestrian(mean)
+            self.process_pedestrian_gnss(x_cam, z_cam)
 
-            # Plot depth values to show distribution
-            # self.plot_depths_distribution(valid_depths.flatten(), rgb_img)
+        return (x1, y1, x2, y2), mean, med, std, hand_raised, pose_debug_img
 
-            if valid_depths.size > 0:
 
-                # Calculate distribution parameter estimates
-                mean_depth = np.mean(valid_depths)
-                std_depth = np.std(valid_depths)
+    def annotate_pedestrian(self, rgb_img, box, pad, ratio, mean_depth, med_depth, hand_raised):
+        x1, y1, x2, y2 = box
+        # No need to un-pad again since we already did in process_pedestrian_box
+        color = (0, 255, 0) if hand_raised else (0, 0, 255)  # green = yes, red = no
+        label = "Hand Raised" if hand_raised else "Pedestrian Detected"
 
-                # Keep values in the first quartile
-                flattened_valid_depths = valid_depths.flatten()
-                first_quartile_val = np.quantile(flattened_valid_depths, 0.25)
-                filtered_depths = flattened_valid_depths[flattened_valid_depths <= first_quartile_val]
+        cv2.rectangle(rgb_img, (x1, y1), (x2, y2), color, 2)
+        cv2.putText(rgb_img, label, (x1, y1 - 20), cv2.FONT_HERSHEY_SIMPLEX, 0.6, color, 2)
 
-                if filtered_depths.size > 0:
-                    mean_depth = np.mean(filtered_depths)
-                    med_depth = np.median(filtered_depths)
-                    std_depth = np.std(filtered_depths)
+        if mean_depth and med_depth:
+            cv2.putText(rgb_img, f"Mean: {mean_depth:.2f}m | Med: {med_depth:.2f}m", (x1, y1 - 40), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 0, 0), 2)
 
-                    # Get x position of pedestrian
-                    cx = rgb_img.shape[1] / 2
-                    x_cam = (u - cx) * mean_depth / self.Focal_Length
-                    z_cam = math.sqrt(mean_depth**2 - x_cam**2)
-                    
-                    # Control vehicle speed based on mean distance to pedestrian
-                    if mean_depth is not None:
-                        self.transition_vehicle_for_pedestrian(mean_depth) 
-                    
-                    self.process_pedestrian_gnss(x_cam, z_cam)
-                    # print(f"Pedestrian at x: {x_cam:.2f}m, mean depth: {mean_depth:.2f}m")
+        # Center point
+        chest_y = (3*y1 + y2) // 4
+        u = (x1 + x2) // 2
+        cv2.circle(rgb_img, (u, chest_y), 4, (255, 255, 0), -1)
 
-                else:
-                    mean_depth = med_depth = std_depth = None
-            else:
-                mean_depth = med_depth = std_depth = None
-
-            # Add rectangle to rgb image
-            cv2.rectangle(rgb_img, (x1, y1), (x2, y2), (0, 255, 0), 2)
-            if mean_depth and med_depth:
-                cv2.putText(rgb_img, f"Mean dist: {mean_depth:.2f}m | Med dist: {med_depth:.2f}m", (x1, y1 - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 0, 0), 2)
-            cv2.circle(rgb_img, (u, chest_y), 4, (0,0,255), -1)
-        
-        return rgb_img, mean_depth, med_depth, std_depth
+        return rgb_img
 
     ###############################################################################
     # Debugging Helper Functions
@@ -521,28 +520,36 @@ class PedestrianDetector:
     # Pedestrian Perception Callback
     ###############################################################################
 
-    def img_callback(self, rgb_img, depth_img):
+    def img_callback(self, rgb_img_msg, depth_img_msg):
         try:
-            rgb_img = self.bridge.imgmsg_to_cv2(rgb_img, "bgr8")
-            depth_img = self.bridge.imgmsg_to_cv2(depth_img, "32FC1")
+            rgb_img = self.bridge.imgmsg_to_cv2(rgb_img_msg, "bgr8")
+            depth_img = self.bridge.imgmsg_to_cv2(depth_img_msg, "32FC1")
 
-            resized_img, ratio, pad = self.letterbox(rgb_img)  # unpack ratio and padding
+            resized_img, ratio, pad = self.letterbox(rgb_img)
+            box_coords, conf = self.get_pedestrian_box(self.pedestrian_model, resized_img)
 
-            box_coords, conf = self.get_pedestrian_box(self.pedestrian_model, resized_img) # Get bounding box of detected pedestrian
+            box, avg, med, std, hand_raised, pose_debug_img = self.process_pedestrian_box(box_coords, conf, pad, ratio, rgb_img, depth_img)
 
-            rgb_img, avg_depth, med_depth, std_depth = self.process_pedestrian_box(box_coords, conf, pad, ratio, rgb_img, depth_img)
+            if box:
+                rgb_img = self.annotate_pedestrian(rgb_img, box, pad, ratio, avg, med, hand_raised)
+            
+            if pose_debug_img is not None:
+                h, w = pose_debug_img.shape[:2]
+                scale = 0.3
+                pose_debug_img = cv2.resize(pose_debug_img, (int(w * scale), int(h * scale)))
 
-            # Publish RGB image
-            ros_rgb_img = self.bridge.cv2_to_imgmsg(rgb_img, "bgr8")
-            self.pub_rgb_pedestrian_image.publish(ros_rgb_img)
+                # Put it in the top-left of the main image
+                h_debug, w_debug = pose_debug_img.shape[:2]
+                rgb_img[0:h_debug, 0:w_debug] = pose_debug_img
 
-            # Publish Depth Data: (publishes [none, none, none] if no pedestrian is detected)
-            depth_data = Float32MultiArray()
-            depth_data.data = [avg_depth, med_depth, std_depth]
-            self.pub_depth.publish(depth_data)
+            # Always publish image
+            ros_rgb = self.bridge.cv2_to_imgmsg(rgb_img, "bgr8")
+            self.pub_rgb_pedestrian_image.publish(ros_rgb)
+
+            self.pub_depth.publish(Float32MultiArray(data=[avg, med, std]))
 
         except CvBridgeError as e:
-            print(e)
+            rospy.logerr(e)
 
 
 ###############################################################################

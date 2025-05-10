@@ -140,7 +140,10 @@ class PedestrianDetector:
 
         # Controls how often we display annotated image
         self.last_vis_time = time.time()
-        self.vis_interval = 0.5
+        self.vis_interval = 0.1
+
+        fourcc = cv2.VideoWriter_fourcc(*'mp4v')
+        self.video_writer = cv2.VideoWriter("pedestrian_output.mp4", fourcc, 10, (1920, 1080))  # Adjust resolution
 
         # Subscribe to GNSS data (All my homies hate Inspva)
         self.gnss_sub   = message_filters.Subscriber("/septentrio_gnss/navsatfix", NavSatFix)
@@ -272,10 +275,10 @@ class PedestrianDetector:
 
             # Draw valid regions (blue rectangles)
             y_min = int(nose.y * cropped_height)
-            y_max_left = int((nose.y + abs(nose.y - left_hip.y) / 2.0) * cropped_height)
-            y_max_right = int((nose.y + abs(nose.y - right_hip.y) / 2.0) * cropped_height)
-            x_left_min, x_left_max = 0, int(0.25 * cropped_width)
-            x_right_min, x_right_max = int(0.75 * cropped_width), cropped_width
+            y_max_left = int(left_hip.y * cropped_height)
+            y_max_right = int(right_hip.y * cropped_height)
+            x_left_min, x_left_max = 0, int(0.333333 * cropped_width)
+            x_right_min, x_right_max = int(0.666666 * cropped_width), cropped_width
 
             cv2.rectangle(debug_img, (x_left_min, y_min), (x_left_max, y_max_left), (255, 0, 0), 1)
             cv2.rectangle(debug_img, (x_right_min, y_min), (x_right_max, y_max_right), (255, 0, 0), 1)
@@ -459,6 +462,9 @@ class PedestrianDetector:
                 self.pub_depth.publish(Float32MultiArray(data=[mean, mean, 0.0]))  # std not tracked here
             else:
                 self.pub_depth.publish(Float32MultiArray(data=[None, None, None]))
+            
+            frame_to_write = cv2.resize(rgb_img, (1920, 1080))  # Must match the VideoWriter size
+            self.video_writer.write(frame_to_write)
 
             ros_rgb = self.bridge.cv2_to_imgmsg(rgb_img, "bgr8")
             self.pub_rgb_pedestrian_image.publish(ros_rgb)

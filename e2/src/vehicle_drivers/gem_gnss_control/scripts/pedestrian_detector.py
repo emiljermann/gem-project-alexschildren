@@ -143,7 +143,7 @@ class PedestrianDetector:
         self.vis_interval = 0.1
 
         fourcc = cv2.VideoWriter_fourcc(*'mp4v')
-        self.video_writer = cv2.VideoWriter("pedestrian_output.mp4", fourcc, 10, (1920, 1080))  # Adjust resolution
+        self.video_writer = None #cv2.VideoWriter("pedestrian_output.mp4", fourcc, 10, (1920, 1080))  # Adjust resolution
 
         # Subscribe to GNSS data (All my homies hate Inspva)
         self.gnss_sub   = message_filters.Subscriber("/septentrio_gnss/navsatfix", NavSatFix)
@@ -283,6 +283,8 @@ class PedestrianDetector:
             cv2.rectangle(debug_img, (x_left_min, y_min), (x_left_max, y_max_left), (255, 0, 0), 1)
             cv2.rectangle(debug_img, (x_right_min, y_min), (x_right_max, y_max_right), (255, 0, 0), 1)
             cv2.putText(debug_img, "POSE DEBUG", (5, 12), cv2.FONT_HERSHEY_SIMPLEX, 0.4, (255, 255, 255), 1)
+
+        self.last_pose_time = now
 
         return left_hand_raised or right_hand_raised, debug_img
     
@@ -463,8 +465,13 @@ class PedestrianDetector:
             else:
                 self.pub_depth.publish(Float32MultiArray(data=[None, None, None]))
             
-            frame_to_write = cv2.resize(rgb_img, (1920, 1080))  # Must match the VideoWriter size
-            self.video_writer.write(frame_to_write)
+            # frame_to_write = cv2.resize(rgb_img, (1920, 1080))  # Must match the VideoWriter size
+            # self.video_writer.write(frame_to_write)
+            if self.video_writer is None:
+                h, w = rgb_img.shape[:2]
+                fourcc = cv2.VideoWriter_fourcc(*"mp4v")
+                self.video_writer = cv2.VideoWriter("pedestrian_output.mp4", fourcc, 10, (w, h))
+                self.video_writer.write(rgb_img)
 
             ros_rgb = self.bridge.cv2_to_imgmsg(rgb_img, "bgr8")
             self.pub_rgb_pedestrian_image.publish(ros_rgb)
@@ -492,4 +499,7 @@ if __name__ == "__main__":
         rate = rospy.spin() # rospy.Rate(10)  # 10 Hz control loop
     except rospy.ROSInterruptException:
         pass
+    finally:
+        if detector.video_writer is not None:
+            detector.video_writer.release()
 

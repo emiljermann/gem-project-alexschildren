@@ -46,7 +46,7 @@ class PurePursuit(object):
 
         self.rate       = rospy.Rate(10)
 
-        self.look_ahead = 7
+        self.look_ahead = 3.5
         self.wheelbase  = 1.75 # meters
         self.offset     = 0.46 # meters
 
@@ -84,7 +84,7 @@ class PurePursuit(object):
         self.read_waypoints() 
 
         self.desired_speed = 1.0  # m/s, reference speed
-        self.max_accel     = 0.46 # % of acceleration
+        self.max_accel     = 0.45 # % of acceleration
         self.pid_speed     = PID(0.5, 0.0, 0.1, wg=20)
         self.speed_filter  = OnlineFilter(1.2, 30, 4)
         self.controller = RawJoystickReader()

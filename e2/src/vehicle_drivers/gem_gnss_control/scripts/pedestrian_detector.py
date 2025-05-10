@@ -466,7 +466,7 @@ class PedestrianDetector:
             now = time.time()
             if now - self.last_vis_time > self.vis_interval:
                 cv2.imshow("Debug View", rgb_img) # Doesn't spam images, just updates existing window
-                cv2.waitKey(1)
+                cv2.waitKey(1) # Blocks for 1 ms, remove this if buggy
                 self.last_vis_time = now
 
         except CvBridgeError as e:

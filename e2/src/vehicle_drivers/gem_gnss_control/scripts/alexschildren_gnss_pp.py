@@ -84,7 +84,7 @@ class PurePursuit(object):
         self.read_waypoints() 
 
         self.desired_speed = 1.0  # m/s, reference speed
-        self.max_accel     = 0.46 # % of acceleration
+        self.max_accel     = 0.45 # % of acceleration
         self.pid_speed     = PID(0.5, 0.0, 0.1, wg=20)
         self.speed_filter  = OnlineFilter(1.2, 30, 4)
         self.controller = RawJoystickReader()
@@ -428,7 +428,7 @@ class PurePursuit(object):
         alpha = math.atan2(dy, dx) - curr_yaw
         
         # ----------------- tuning this part as needed -----------------
-        k = 1.8
+        k = 1
         angle_i = (k * 2.0 * math.sin(alpha)) / L
         # ----------------- tuning this part as needed -----------------
         f_delta = math.atan(self.wheelbase * angle_i)
@@ -461,8 +461,8 @@ class PurePursuit(object):
         if output_accel > self.max_accel:
             output_accel = self.max_accel
 
-        if output_accel < 0.31:
-            output_accel = 0.31
+        if output_accel < 0.3:
+            output_accel = 0.3
 
         if (f_delta_deg <= 30 and f_delta_deg >= -30):
             self.turn_cmd.ui16_cmd = 1

@@ -566,7 +566,7 @@ class PurePursuit(object):
                 # self.state = "DROPPING_OFF"
                 self.pub_transition.publish(String(data="DROPPING_OFF"))
             elif self.state == "DROPPING_OFF" and self.gem_enable:
-                self.pp_iter()
+                self.start_pp()
                 stop_x = self.path_points_x[self.stop_wp_index]
                 stop_y = self.path_points_y[self.stop_wp_index]
                 dist_to_stop = self.dist((curr_x, curr_y), (stop_x, stop_y))

@@ -138,6 +138,10 @@ class PedestrianDetector:
         self.ts = message_filters.ApproximateTimeSynchronizer([self.sub_rgb_img, self.sub_depth_img], queue_size=2, slop=0.1)
         self.ts.registerCallback(self.img_callback)
 
+        # Controls how often we display annotated image
+        self.last_vis_time = time.time()
+        self.vis_interval = 0.5
+
         # Subscribe to GNSS data (All my homies hate Inspva)
         self.gnss_sub   = message_filters.Subscriber("/septentrio_gnss/navsatfix", NavSatFix)
         self.ins_sub    = message_filters.Subscriber("/septentrio_gnss/insnavgeod", INSNavGeod)
@@ -458,6 +462,12 @@ class PedestrianDetector:
 
             ros_rgb = self.bridge.cv2_to_imgmsg(rgb_img, "bgr8")
             self.pub_rgb_pedestrian_image.publish(ros_rgb)
+
+            now = time.time()
+            if now - self.last_vis_time > self.vis_interval:
+                cv2.imshow("Debug View", rgb_img) # Doesn't spam images, just updates existing window
+                cv2.waitKey(1)
+                self.last_vis_time = now
 
         except CvBridgeError as e:
             rospy.logerr(e)

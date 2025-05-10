@@ -42,7 +42,7 @@ class Printer:
         self.state = "NULL_STATE"
 
         self.frame_count = 0
-        self.save_images = True  # Toggle for saving
+        self.save_images = False  # Toggle for saving
         self.image_dir = "saved_images"
         os.makedirs(self.image_dir, exist_ok=True)
 

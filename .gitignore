@@ -4,6 +4,13 @@ e2/build/
 
 # model weight files
 *.pt
+*.jpg
+*.mp4
+*.png
+*.gif
+*.pyc
+*.txt
+*.emil
 
 # pycache
 __pycache__/

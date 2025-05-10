@@ -15,6 +15,7 @@ import scipy.signal as signal
 from cv_bridge import CvBridge, CvBridgeError
 import matplotlib.pyplot as plt
 import datetime
+import mediapipe as mp
 
 from filters import OnlineFilter
 
@@ -94,6 +95,15 @@ class PedestrianDetector:
         
         # Set up compute device (GPU if available, otherwise CPU)
         self.device = 'cuda' if torch.cuda.is_available() else 'cpu'
+
+        self.pose = mp.solutions.pose.Pose(
+            static_image_mode=False,
+            model_complexity=1,
+            enable_segmentation=False,
+            min_detection_confidence=0.5
+        )
+        self.last_pose_time = 0  # Throttle timer for pose estimation
+        self.pose_throttle_interval = 0.0  # Minimum time (s) between pose checks
 
         # Commented out stop sign detection model code
         self.pedestrian_model = torch.hub.load('ultralytics/yolov5', 'yolov5s', pretrained=True, trust_repo=True)
@@ -220,6 +230,40 @@ class PedestrianDetector:
     def local_xy_to_wps(self, local_x, local_y):
         lat, lon = axy.xy2ll(local_x, local_y, self.olat, self.olon)
         return lat, lon
+    
+    def is_hand_raised(self, cropped_img):
+        now = time.time()
+        if now - self.last_pose_time < self.pose_throttle_interval:
+            rospy.loginfo("Skipping pose estimation due to throttle")
+            return False
+
+        rgb = cv2.cvtColor(cropped_img, cv2.COLOR_BGR2RGB)
+        cropped_height, cropped_width, channels = cropped_img.shape
+        results = self.pose.process(rgb)
+        if not results.pose_landmarks:
+            return False
+
+        landmarks = results.pose_landmarks.landmark
+
+        # Left and right wrist and shoulder indices
+        left_wrist = landmarks[15]
+        left_shoulder = landmarks[11]
+        left_hip = landmarks[23]
+        right_wrist = landmarks[16]
+        right_shoulder = landmarks[12]
+        right_hip = landmarks[24]
+        nose = landmarks[0]
+
+        # Visibility threshold check
+        left_valid = left_wrist.visibility > 0.5 and left_shoulder.visibility > 0.5
+        right_valid = right_wrist.visibility > 0.5 and right_shoulder.visibility > 0.5
+
+        # I want to make it so that wrist is only detected within a certain y range (upper half hip to nose)
+        # and that it's only detected past a certain x threshold (currently the outer quarters of the image)
+        left_hand_raised = left_valid and left_wrist.y > nose.y and left_wrist.y < (nose.y + abs(nose.y - left_hip.y) / 2.0) and (left_wrist.x < cropped_width / 4.0 or left_wrist.x > 3*(cropped_width / 4.0)) 
+        right_hand_raised = right_valid and right_wrist.y > nose.y and right_wrist.y < (nose.y + abs(nose.y - right_hip.y) / 2.0) and (right_wrist.x < cropped_width / 4.0 or right_wrist.x > 3*(cropped_width / 4.0))
+
+        return left_hand_raised or right_hand_raised
     
     def enable_callback(self, msg):
         self.pacmod_enable = msg.data
@@ -378,6 +422,13 @@ class PedestrianDetector:
             y1 = int((y1 - pad[1]) / ratio[1])
             x2 = int((x2 - pad[0]) / ratio[0])
             y2 = int((y2 - pad[1]) / ratio[1])
+
+            # Add hand raise detection
+            cropped = rgb_img[y1:y2, x1:x2]
+            hand_raised = self.is_hand_raised(cropped)
+            if not hand_raised:
+                rospy.loginfo("Detected person is not raising hand — skipping pickup")
+                return rgb_img, None, None, None
 
             # Publish box coordinate data
             box_coords_msg = Float32MultiArray()

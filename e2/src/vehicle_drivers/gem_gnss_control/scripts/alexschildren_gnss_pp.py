@@ -22,6 +22,8 @@ import numpy as np
 from numpy import linalg as la
 import scipy.signal as signal
 import matplotlib.pyplot as plt
+import time
+import subprocess
 
 from filters import OnlineFilter
 from pid_controllers import PID
@@ -146,16 +148,21 @@ class PurePursuit(object):
         self.path_plot, = self.ax.plot([], [], 'k--', label='Path')
         self.curr_pos_plot, = self.ax.plot([], [], 'bo', label='Current Position')
         self.goal_plot, = self.ax.plot([], [], 'ro', label='Goal Point')
-        self.pedestrian_plot, = self.ax.plot([], [], 'go', label='Pedestrian Point')
-        self.polyfit_plot, = self.ax.plot([], [], 'r-', label='Polyfit Path')
+        # self.pedestrian_plot, = self.ax.plot([], [], 'go', label='Pedestrian Point')
+        # self.polyfit_plot, = self.ax.plot([], [], 'r-', label='Polyfit Path')
         self.heading_arrows = self.ax.quiver([0,0], [0,0], [0,0], [0,0], angles='xy', scale_units='xy', scale=1, color='g')
         self.polyfit_arrow = self.ax.quiver([0], [0], [0], [0], angles='xy', scale_units='xy', scale=1, color='r')
         self.ax.set_xlabel("X (m)")
         self.ax.set_ylabel("Y (m)")
         self.ax.set_title("Pure Pursuit Live Map")
         self.ax.legend()
+        self.time_stamps = list()
+        self.start_time = time.time()
+        self.frame_count = 0
     
     def update_plot(self, curr_x, curr_y, curr_h, goal_x, goal_y, goal_h):
+        time = time.time() - self.start_time
+
         arrow_len = 2
         self.path_plot.set_data(self.path_points_x, self.path_points_y)
         self.curr_pos_plot.set_data([curr_x], [curr_y])
@@ -164,22 +171,29 @@ class PurePursuit(object):
         self.heading_arrows.set_UVC([arrow_len*np.cos(curr_h), arrow_len*np.cos(goal_h)], 
                                      [arrow_len*np.sin(curr_h), arrow_len*np.sin(goal_h)])
         self.heading_arrows.set_offsets(np.array([[curr_x, curr_y], [goal_x, goal_y]]))
-        if self.pedestrian_lat and self.pedestrian_lon:
-            local_x, local_y = self.wps_to_local_xy(self.pedestrian_lon, self.pedestrian_lat)
-            self.pedestrian_plot.set_data([local_x], [local_y])
+        # if self.pedestrian_lat and self.pedestrian_lon:
+        #     local_x, local_y = self.wps_to_local_xy(self.pedestrian_lon, self.pedestrian_lat)
+        #     self.pedestrian_plot.set_data([local_x], [local_y])
 
-        if self.poly is not None:
-            x_polyfit = np.linspace(curr_x - 5, curr_x + 5, 100)
-            y_polyfit = self.poly(x_polyfit)
-            self.polyfit_plot.set_data(x_polyfit, y_polyfit)
-            self.polyfit_arrow.set_UVC([arrow_len*np.cos(self.polyfit_yaw)], 
-                                     [arrow_len*np.sin(self.polyfit_yaw)])
-            self.polyfit_arrow.set_offsets(np.array([[curr_x, curr_y]]))
+        # if self.poly is not None:
+        #     x_polyfit = np.linspace(curr_x - 5, curr_x + 5, 100)
+        #     y_polyfit = self.poly(x_polyfit)
+        #     self.polyfit_plot.set_data(x_polyfit, y_polyfit)
+        #     self.polyfit_arrow.set_UVC([arrow_len*np.cos(self.polyfit_yaw)], 
+        #                              [arrow_len*np.sin(self.polyfit_yaw)])
+        #     self.polyfit_arrow.set_offsets(np.array([[curr_x, curr_y]]))
 
         self.ax.set_xlim(curr_x - 10, curr_x + 10)
         self.ax.set_ylim(curr_y - 10, curr_y + 10)
         self.fig.canvas.draw()
+
+        fname = f"frames/frame_{self.frame_count:04d}.png"
+        self.fig.savefig(fname)
+        self.time_stamps.append(time)
+
         self.fig.canvas.flush_events()
+        self.frame_count += 1
+        
 
     def ins_callback(self, msg):
         self.heading = round(msg.heading, 6)
@@ -595,7 +609,42 @@ def pure_pursuit():
         pp.start_pp()
     except rospy.ROSInterruptException:
         pass
+    finally:
+        with open("frames/timestamps.txt", "w") as f:
+            for t in pp.time_stamps:
+                f.write(f"{t}\n")
+        # Get delays (in 1/100s for GIF)
+        delays = [int(100 * (pp.time_stamps[i+1] - pp.time_stamps[i])) for i in range(len(pp.time_stamps)-1)]
+        delays.append(delays[-1])  # Repeat last delay
 
+        from PIL import Image
+        frames = [Image.open(f"frames/frame_{i:04d}.png") for i in range(len(pp.time_stamps))]
+        frames[0].save("map_gif.gif", save_all=True, append_images=frames[1:],
+               duration=delays, loop=0)
+
+        # Estimate FPS from timestamps
+        if len(pp.time_stamps) >= 2:
+            avg_fps = 1.0 / np.mean(np.diff(pp.time_stamps))
+        else:
+            avg_fps = 10  # fallback
+
+        create_mp4_from_frames(folder="frames", output="map_video.mp4", fps=round(avg_fps))
+
+def create_mp4_from_frames(folder="frames", output="map_video.mp4", fps=10):
+    command = [
+        "ffmpeg",
+        "-y",  # overwrite
+        "-framerate", str(fps),
+        "-i", f"{folder}/frame_%04d.png",
+        "-vcodec", "libx264",
+        "-pix_fmt", "yuv420p",
+        output
+    ]
+    try:
+        subprocess.run(command, check=True)
+        print(f"MP4 video saved as {output}")
+    except subprocess.CalledProcessError as e:
+        print("FFmpeg failed:", e)
 
 if __name__ == '__main__':
     pure_pursuit()

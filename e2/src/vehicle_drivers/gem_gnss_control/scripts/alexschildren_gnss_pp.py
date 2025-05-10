@@ -159,9 +159,9 @@ class PurePursuit(object):
         self.time_stamps = list()
         self.start_time = time.time()
         self.frame_count = 0
+        self.make_vid = False
     
     def update_plot(self, curr_x, curr_y, curr_h, goal_x, goal_y, goal_h):
-        t = time.time() - self.start_time
 
         arrow_len = 2
         self.path_plot.set_data(self.path_points_x, self.path_points_y)
@@ -187,9 +187,11 @@ class PurePursuit(object):
         self.ax.set_ylim(curr_y - 10, curr_y + 10)
         self.fig.canvas.draw()
 
-        fname = f"frames/frame_{self.frame_count:04d}.png"
-        self.fig.savefig(fname)
-        self.time_stamps.append(t)
+        if self.save_vid:
+            t = time.time() - self.start_time
+            fname = f"frames/frame_{self.frame_count:04d}.png"
+            self.fig.savefig(fname)
+            self.time_stamps.append(t)
 
         self.fig.canvas.flush_events()
         self.frame_count += 1
@@ -610,26 +612,27 @@ def pure_pursuit():
     except rospy.ROSInterruptException:
         pass
     finally:
-        with open("frames/timestamps.txt", "w") as f:
-            for t in pp.time_stamps:
-                f.write(f"{t}\n")
-        # Get delays (in 1/100s for GIF)
-        delays = [int(100 * (pp.time_stamps[i+1] - pp.time_stamps[i])) for i in range(len(pp.time_stamps)-1)]
-        delays.append(delays[-1])  # Repeat last delay
+        if pp.save_vid:
+            with open("frames/timestamps.txt", "w") as f:
+                for t in pp.time_stamps:
+                    f.write(f"{t}\n")
+            # Get delays (in 1/100s for GIF)
+            delays = [int(100 * (pp.time_stamps[i+1] - pp.time_stamps[i])) for i in range(len(pp.time_stamps)-1)]
+            delays.append(delays[-1])  # Repeat last delay
 
-        from PIL import Image
-        frames = [Image.open(f"frames/frame_{i:04d}.png") for i in range(len(pp.time_stamps))]
-        frames[0].save("map_gif.gif", save_all=True, append_images=frames[1:],
-               duration=delays, loop=0)
+            from PIL import Image
+            frames = [Image.open(f"frames/frame_{i:04d}.png") for i in range(len(pp.time_stamps))]
+            frames[0].save("map_gif.gif", save_all=True, append_images=frames[1:],
+                duration=delays, loop=0)
 
-        # Estimate FPS from timestamps
-        if len(pp.time_stamps) >= 2:
-            avg_fps = 1.0 / np.mean(np.diff(pp.time_stamps))
-        else:
-            avg_fps = 10  # fallback
+            # Estimate FPS from timestamps
+            if len(pp.time_stamps) >= 2:
+                avg_fps = 1.0 / np.mean(np.diff(pp.time_stamps))
+            else:
+                avg_fps = 10  # fallback
 
-        create_mp4_from_frames(folder="frames", output="map_video.mp4", fps=round(avg_fps))
-        delete_frames(folder = "folder")
+            create_mp4_from_frames(folder="frames", output="map_video.mp4", fps=round(avg_fps))
+            delete_frames(folder = "folder")
 
 def create_mp4_from_frames(folder="frames", output="map_video.mp4", fps=10):
     command = [

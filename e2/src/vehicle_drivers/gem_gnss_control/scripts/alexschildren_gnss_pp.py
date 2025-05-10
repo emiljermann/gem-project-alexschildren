@@ -48,7 +48,7 @@ class PurePursuit(object):
 
         self.rate       = rospy.Rate(10)
 
-        self.look_ahead = 3.5
+        self.look_ahead = 7
         self.wheelbase  = 1.75 # meters
         self.offset     = 0.46 # meters
 
@@ -444,7 +444,7 @@ class PurePursuit(object):
         alpha = math.atan2(dy, dx) - curr_yaw
         
         # ----------------- tuning this part as needed -----------------
-        k = 1.8
+        k = 1.0
         angle_i = (k * 2.0 * math.sin(alpha)) / L
         # ----------------- tuning this part as needed -----------------
         f_delta = math.atan(self.wheelbase * angle_i)
@@ -477,8 +477,8 @@ class PurePursuit(object):
         if output_accel > self.max_accel:
             output_accel = self.max_accel
 
-        if output_accel < 0.31:
-            output_accel = 0.31
+        if output_accel < 0.3:
+            output_accel = 0.3
 
         if (f_delta_deg <= 30 and f_delta_deg >= -30):
             self.turn_cmd.ui16_cmd = 1

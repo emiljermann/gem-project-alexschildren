@@ -70,7 +70,7 @@ class PedestrianDetector:
 
         # State control
         self.pub_transition = rospy.Publisher("state_manager_node/transition", String, queue_size = 1)
-        self.state_sub = message_filters.Subscriber("/state_manager_node/state", String, self.set_state)
+        self.state_sub = rospy.Subscriber("/state_manager_node/state", String, self.set_state)
         self.state = ""
         
         # Frame buffer for batch processing to increase efficiency
@@ -432,7 +432,8 @@ class PedestrianDetector:
 
             # Add rectangle to rgb image
             cv2.rectangle(rgb_img, (x1, y1), (x2, y2), (0, 255, 0), 2)
-            cv2.putText(rgb_img, f"Mean dist: {mean_depth:.2f}m | Med dist: {med_depth:.2f}m", (x1, y1 - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 0, 0), 2)
+            if mean_depth and med_depth:
+                cv2.putText(rgb_img, f"Mean dist: {mean_depth:.2f}m | Med dist: {med_depth:.2f}m", (x1, y1 - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 0, 0), 2)
             cv2.circle(rgb_img, (u, chest_y), 4, (0,0,255), -1)
         
         return rgb_img, mean_depth, med_depth, std_depth

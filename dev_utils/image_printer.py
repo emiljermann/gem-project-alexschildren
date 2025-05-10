@@ -30,10 +30,6 @@ class Printer:
         # Set up compute device (GPU if available, otherwise CPU)
         self.device = 'cuda' if torch.cuda.is_available() else 'cpu'
 
-        # Commented out stop sign detection model code
-        self.pedestrian_model = torch.hub.load('ultralytics/yolov5', 'yolov5s', pretrained=True, trust_repo=True)
-        self.pedestrian_model.to(self.device).eval()
-
         # Initialize ROS node
         rospy.init_node('image_printer_node', anonymous=True)
 
@@ -41,9 +37,9 @@ class Printer:
 
         # Rostopic Subscriptions
         self.sub_rgb_pedestrian_image = rospy.Subscriber("pedestrian_detection/rgb/pedestrian_image", Image, self.printer, queue_size=1)
-        self.sub_state = rospy.Subscriber("state_manager_node/state", String, self.state_callback)
+        self.sub_state = rospy.Subscriber("/state_manager_node/state", String, self.state_callback)
        
-        self.state = "UNINITIALIZED"
+        self.state = "NULL_STATE"
 
         self.frame_count = 0
         self.save_images = True  # Toggle for saving
@@ -55,7 +51,7 @@ class Printer:
         self.store_video = True
     
     def state_callback(self, msg):
-        self.pedestrian_state = msg.data
+        self.state = msg.data
     
     def pickup_time_callback(self, msg):
         self.estimated_pickup_time = msg.data
@@ -87,7 +83,7 @@ class Printer:
         except CvBridgeError as e:
             print(e)
 
-    def save_video(self, filename="output_video.mp4", fps=10):
+    def save_video(self, filename="output_video2.mp4", fps=10):
         if not self.video_frames:
             print("No frames to save.")
             return

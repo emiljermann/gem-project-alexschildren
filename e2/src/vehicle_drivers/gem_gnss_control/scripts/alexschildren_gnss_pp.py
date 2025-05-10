@@ -46,7 +46,7 @@ class PurePursuit(object):
 
         self.rate       = rospy.Rate(10)
 
-        self.look_ahead = 2.5
+        self.look_ahead = 7
         self.wheelbase  = 1.75 # meters
         self.offset     = 0.46 # meters
 
@@ -84,7 +84,7 @@ class PurePursuit(object):
         self.read_waypoints() 
 
         self.desired_speed = 1.0  # m/s, reference speed
-        self.max_accel     = 0.45 # % of acceleration
+        self.max_accel     = 0.46 # % of acceleration
         self.pid_speed     = PID(0.5, 0.0, 0.1, wg=20)
         self.speed_filter  = OnlineFilter(1.2, 30, 4)
         self.controller = RawJoystickReader()
@@ -428,7 +428,7 @@ class PurePursuit(object):
         alpha = math.atan2(dy, dx) - curr_yaw
         
         # ----------------- tuning this part as needed -----------------
-        k = 0.41
+        k = 1.8
         angle_i = (k * 2.0 * math.sin(alpha)) / L
         # ----------------- tuning this part as needed -----------------
         f_delta = math.atan(self.wheelbase * angle_i)
@@ -448,6 +448,11 @@ class PurePursuit(object):
             print("Steering wheel angle: " + str(steering_angle) + " degrees" )
             print(f"Ignored: {self.brake_cmd.ignore}, {self.accel_cmd.ignore}")
             print("\n")
+        
+        # if abs(np.degrees(f_delta)) > 20:
+        #     self.desired_speed = 1.1
+        # else:
+        #     self.desired_speed = 1.5
 
         current_time = rospy.get_time()
         filt_vel     = self.speed_filter.get_data(self.speed)
@@ -456,8 +461,8 @@ class PurePursuit(object):
         if output_accel > self.max_accel:
             output_accel = self.max_accel
 
-        if output_accel < 0.3:
-            output_accel = 0.3
+        if output_accel < 0.31:
+            output_accel = 0.31
 
         if (f_delta_deg <= 30 and f_delta_deg >= -30):
             self.turn_cmd.ui16_cmd = 1
@@ -533,7 +538,7 @@ class PurePursuit(object):
                     v3 = [math.cos(self.path_points_heading[idx]), math.sin(self.path_points_heading[idx])]
                     if np.dot(v2, v3) > 0:
                         self.goal = idx
-                        break
+                        # break
         
             if self.stop_wp_index is not None:
                 stop_x = self.path_points_x[self.stop_wp_index]

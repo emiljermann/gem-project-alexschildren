@@ -1,20 +1,28 @@
 import os 
-import cv2
-import csv
-import math
-import time
-import torch
 import numpy as np
-from numpy import linalg as la
 import alvinxy as axy
+import sys
+"""
+--------------------------------
+This script extracts waypoints from a rosbag file containing GNSS and INS data.
 
+To run the script::
+python3 dev_utils/coord_extraction <rosbag_file>
 
+To record bag::
+rosbag record -O <bag_file> /septentrio_gnss/navsatfix /septentrio_gnss/insnavgeod
+---------------------------------
+"""
+
+# Change this! ->
+output_filename   = "e2/src/vehicle_drivers/gem_gnss_control/waypoints/xyhead_new_track.csv"
+
+# Typical paths: changing these will not do anything unless you want to break the script apart and run it manually
 # created using `rosbag echo /septentrio_gnss/navsatfix -b <bag_file> > <output_file>`
-gnss_input_filename = "dev_utils/coord_extraction/gnss_demo_path.txt" 
+gnss_input_filename = "dev_utils/coord_extraction/temp_gnss_path.txt" 
 # created using `rosbag echo /septentrio_gnss/insnavgeod -b <bag_file> > <output_file>`
-ins_input_filename = "dev_utils/coord_extraction/ins_demo_path.txt" 
+ins_input_filename = "dev_utils/coord_extraction/temp_ins_path.txt" 
 
-output_filename   = "e2/src/vehicle_drivers/gem_gnss_control/waypoints/xyhead_custom_pp.csv"
 
 # given constants from pedestrian detector (used to create waypoints in a cartesian frame at origin olat,olon)
 offset     = 0.46 # meters
@@ -42,6 +50,23 @@ def get_gem_state(lat, lon, heading):
     
     return round(curr_x, 3), round(curr_y, 3), round(curr_yaw, 4)
     
+def create_txt_file(rosbag_file, gnss_filename, ins_filename):
+    # Create a temporary file to store the GNSS and INS data
+    status = os.system(f"rosbag echo /septentrio_gnss/navsatfix -b {rosbag_file} > {gnss_filename}")
+    if status:
+        print("Error creating GNSS file")
+        return 1
+    
+    status = os.system(f"rosbag echo /septentrio_gnss/insnavgeod -b {rosbag_file} > {ins_filename}")
+    if status:
+        print("Error creating INS file")
+        return 1
+    return 0
+    
+def delete_txt_file(gnss_filename, ins_filename):
+    # Delete the temporary files
+    os.remove(gnss_filename)
+    os.remove(ins_filename)
 def get_waypoints(gnss_filename, ins_filename):
     gnss_points = []
     ins_points = []
@@ -80,8 +105,23 @@ def write_to_file(filename, waypoints):
             f.write(f"{cx},{cy},{yaw}\n")
             
 def main():
+    if len(sys.argv) < 2:
+        print("Usage: python3 dev_utils/coord_extraction <rosbag_file> <optional! 1 to keep temp files>")
+        return
+    rosbag_file = sys.argv[1]
+    keep_temp_files = False
+    if len(sys.argv) > 2:
+        keep_temp_files = int(sys.argv[2])
+    print("Creating temp rosbag output files...")
+    if(create_txt_file(rosbag_file, gnss_input_filename, ins_input_filename)):
+        return
+    print("Extracting waypoints...")
     waypoints = get_waypoints(gnss_input_filename, ins_input_filename)
+    print("writing waypoints to file")
     write_to_file(output_filename, waypoints)
+    if not keep_temp_files:
+        print("Cleaning up temp files...")
+        delete_txt_file(gnss_input_filename, ins_input_filename)
     print(f"Wrote {waypoints.shape[0]} waypoints to {output_filename}")
         
         

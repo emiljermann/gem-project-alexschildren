@@ -149,7 +149,7 @@ class PurePursuit(object):
         self.path_plot, = self.ax.plot([], [], 'k--', label='Path')
         self.curr_pos_plot, = self.ax.plot([], [], 'bo', label='Current Position')
         self.goal_plot, = self.ax.plot([], [], 'ro', label='Goal Wayoint')
-        self.dest_plot, = self.ax.plot([], [], 'po', label='Destination Point')
+        self.dest_plot, = self.ax.plot([], [], 'o', label='Destination Point', color='purple')
         self.pedestrian_plot, = self.ax.plot([], [], 'go', label='Pedestrian Point')
         # self.polyfit_plot, = self.ax.plot([], [], 'r-', label='Polyfit Path')
         self.heading_arrows = self.ax.quiver([0,0], [0,0], [0,0], [0,0], angles='xy', scale_units='xy', scale=1, color='g')

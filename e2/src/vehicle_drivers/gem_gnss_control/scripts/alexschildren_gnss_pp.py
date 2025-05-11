@@ -87,7 +87,7 @@ class PurePursuit(object):
         self.read_waypoints() 
 
         self.desired_speed = 1.0  # m/s, reference speed
-        self.max_accel     = 0.45 # % of acceleration
+        self.max_accel     = 0.36 # % of acceleration
         self.pid_speed     = PID(0.5, 0.0, 0.1, wg=20)
         self.speed_filter  = OnlineFilter(1.2, 30, 4)
         self.controller = RawJoystickReader()
@@ -161,6 +161,9 @@ class PurePursuit(object):
         self.start_time = time.time()
         self.frame_count = 0
         self.save_vid = False
+
+        if self.save_vid:
+            os.makedirs("frames", exist_ok=True)
     
     def update_plot(self, curr_x, curr_y, curr_h, goal_x, goal_y, goal_h):
 
@@ -272,7 +275,7 @@ class PurePursuit(object):
     def read_waypoints(self):
         # read recorded GPS lat, lon, heading
         dirname  = os.path.dirname(__file__)
-        filename = os.path.join(dirname, '../waypoints/test2waypoints.csv')
+        filename = os.path.join(dirname, '../waypoints/final_waypoints.csv')
         with open(filename) as f:
             path_points = [tuple(line) for line in csv.reader(f)]
         # x towards East and y towards North
@@ -616,7 +619,7 @@ def pure_pursuit():
     finally:
         if pp.save_vid:
             ts = time.strftime("%m%d_%H%M")
-            with open(os.path.join(OUT_DIR, "timestamps.txt"), "w") as f:
+            with open(os.path.join(OUT_DIR, f"timestamps_{ts}.txt"), "w") as f:
                 for t in pp.time_stamps:
                     f.write(f"{t}\n")
             # Get delays (in 1/100s for GIF)

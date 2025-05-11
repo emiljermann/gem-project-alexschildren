@@ -454,6 +454,10 @@ class PedestrianDetector:
             # Draw the bounding box on the image (adjust for padding and ratio)
             x1, y1, x2, y2 = box_coords
             # Convert to int and adjust for letterbox padding
+            x1 = int((x1 - pad[0]) / ratio[0])
+            y1 = int((y1 - pad[1]) / ratio[1])
+            x2 = int((x2 - pad[0]) / ratio[0])
+            y2 = int((y2 - pad[1]) / ratio[1])
 
             # Add hand raise detection
             cropped = rgb_img[y1:y2, x1:x2]

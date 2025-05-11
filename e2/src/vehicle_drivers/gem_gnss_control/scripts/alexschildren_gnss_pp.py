@@ -266,6 +266,8 @@ class PurePursuit(object):
         path_plot.set_data(self.path_points_x, self.path_points_y)
         curr_x, curr_y, curr_yaw = self.get_gem_state()
         curr_pos_plot.set_data([curr_x], [curr_y])
+        ax.set_xlim(np.min(self.path_points_x) - 10, np.max(self.path_points_x) + 10)
+        ax.set_ylim(np.min(self.path_points_y) - 10, np.max(self.path_points_y) + 10)
         plt.show(block=False)
         clicks = plt.ginput(n=1)[0]
         

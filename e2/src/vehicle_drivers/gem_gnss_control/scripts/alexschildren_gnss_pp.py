@@ -148,8 +148,9 @@ class PurePursuit(object):
         self.fig, self.ax = plt.subplots()
         self.path_plot, = self.ax.plot([], [], 'k--', label='Path')
         self.curr_pos_plot, = self.ax.plot([], [], 'bo', label='Current Position')
-        self.goal_plot, = self.ax.plot([], [], 'ro', label='Goal Point')
-        # self.pedestrian_plot, = self.ax.plot([], [], 'go', label='Pedestrian Point')
+        self.goal_plot, = self.ax.plot([], [], 'ro', label='Goal Wayoint')
+        self.dest_plot, = self.ax.plot([], [], 'po', label='Destination Point')
+        self.pedestrian_plot, = self.ax.plot([], [], 'go', label='Pedestrian Point')
         # self.polyfit_plot, = self.ax.plot([], [], 'r-', label='Polyfit Path')
         self.heading_arrows = self.ax.quiver([0,0], [0,0], [0,0], [0,0], angles='xy', scale_units='xy', scale=1, color='g')
         self.polyfit_arrow = self.ax.quiver([0], [0], [0], [0], angles='xy', scale_units='xy', scale=1, color='r')
@@ -172,12 +173,17 @@ class PurePursuit(object):
         self.curr_pos_plot.set_data([curr_x], [curr_y])
         self.goal_plot.set_data([goal_x], [goal_y])
 
+        if self.stop_wp_index is not None:
+            stop_x = self.path_points_x[self.stop_wp_index]
+            stop_y = self.path_points_y[self.stop_wp_index]
+            self.dest_plot.set_data([stop_x], [stop_y])
+            
         self.heading_arrows.set_UVC([arrow_len*np.cos(curr_h), arrow_len*np.cos(goal_h)], 
                                      [arrow_len*np.sin(curr_h), arrow_len*np.sin(goal_h)])
         self.heading_arrows.set_offsets(np.array([[curr_x, curr_y], [goal_x, goal_y]]))
-        # if self.pedestrian_lat and self.pedestrian_lon:
-        #     local_x, local_y = self.wps_to_local_xy(self.pedestrian_lon, self.pedestrian_lat)
-        #     self.pedestrian_plot.set_data([local_x], [local_y])
+        if self.pedestrian_lat and self.pedestrian_lon:
+            local_x, local_y = self.wps_to_local_xy(self.pedestrian_lat, self.pedestrian_lon)
+            self.pedestrian_plot.set_data([local_x], [local_y])
 
         # if self.poly is not None:
         #     x_polyfit = np.linspace(curr_x - 5, curr_x + 5, 100)
@@ -252,7 +258,22 @@ class PurePursuit(object):
         self.brake_pub.publish(self.brake_cmd)
         self.turn_cmd.ui16_cmd = 1
         self.turn_pub.publish(self.turn_cmd)
-
+        
+    def get_destination_input(self):
+        fig, ax = plt.subplots()
+        path_plot, = ax.plot([], [], 'k--', label='Path')
+        curr_pos_plot, = ax.plot([], [], 'bo', label='Current Position')
+        path_plot.set_data(path_points_x, path_points_y)
+        curr_pos_plot.set_data([curr_x], [curr_y])
+        plt.show(block=False)
+        clicks = plt.ginput(n=1)[0]
+        
+        distances = (self.path_points_x - clicks[0])**2 + (self.path_points_y - clicks[1])**2
+        closest_index = np.argmin(distances)
+        return closest_index
+        
+        
+        
     def resume_motion(self):
         # Clear brake command
         self.brake_cmd.enable = False
@@ -370,39 +391,18 @@ class PurePursuit(object):
 
         # Dropoff selection
 
-        dropoff_options = {
-            1: (1, 18.283, -12.34, -0.01, "the start", ),                        # the start
-            2: (386, 71.517, -4.92, 1.8999, "90 degrees into first circle"),     # 90 degrees into first circle
-            3: (866, -10.496, -12.086, 2.8312, "start of other circle")          # start of the other circle
-        }
-
         print("Select a dropoff location:")
-        for i, (idx, x, y, theta, desc) in dropoff_options.items():
-            print(f"{i}) x={x}, y={y} ({desc})")
 
-        while True:
-            try:
-                choice = int(input("Enter the number of your choice (1-3): "))
-                if choice in dropoff_options:
-                    dropoff_point = dropoff_options[choice]
-                    idx, x, y, theta, desc = dropoff_point
-                    print(f"Selected waypoint {idx}: ({x}, {y}) — {desc}")
-                    
-                    if idx >= self.wp_size:
-                        rospy.logwarn(f"Dropoff index {idx} out of bounds. Max is {self.wp_size - 1}")
-                        continue
+    
+        self.stop_wp_index = self.get_destination_input() # returns waypoint idx of where we want to go
 
-                    self.stop_wp_index = idx
-                    self.closest_wp_index = int(np.argmin(self.dist_arr))
-                    estimated_time_to_stop_point = self.estimate_drive_time_to_stop_point_arc()
-                    # estimated_time_to_stop_point = self.estimate_drive_time_to_stop_point_birds_eye()
-                    rospy.loginfo(f"Estimated time to dropoff pedestrian: {estimated_time_to_stop_point}")
-                    self.pub_pickup_time.publish(Float32(estimated_time_to_stop_point))
-                    break
-                else:
-                    print("Invalid choice. Please enter 1, 2, or 3.")
-            except ValueError:
-                print("Please enter a valid number.")
+        self.closest_wp_index = int(np.argmin(self.dist_arr))
+        estimated_time_to_stop_point = self.estimate_drive_time_to_stop_point_arc()
+        # estimated_time_to_stop_point = self.estimate_drive_time_to_stop_point_birds_eye()
+        rospy.loginfo(f"Estimated time to dropoff pedestrian: {estimated_time_to_stop_point}")
+        self.pub_pickup_time.publish(Float32(estimated_time_to_stop_point))
+        
+                
 
     def handle_dropoff(self):
         self._apply_brakes()

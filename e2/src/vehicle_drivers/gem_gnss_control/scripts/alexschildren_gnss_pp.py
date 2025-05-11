@@ -87,7 +87,7 @@ class PurePursuit(object):
         self.read_waypoints() 
 
         self.desired_speed = 1.0  # m/s, reference speed
-        self.max_accel     = 0.36 # % of acceleration
+        self.max_accel     = 0.45 # % of acceleration
         self.pid_speed     = PID(0.5, 0.0, 0.1, wg=20)
         self.speed_filter  = OnlineFilter(1.2, 30, 4)
         self.controller = RawJoystickReader()
@@ -263,7 +263,7 @@ class PurePursuit(object):
         fig, ax = plt.subplots()
         path_plot, = ax.plot([], [], 'k--', label='Path')
         curr_pos_plot, = ax.plot([], [], 'bo', label='Current Position')
-        path_plot.set_data(path_points_x, path_points_y)
+        path_plot.set_data(self.path_points_x, self.path_points_y)
         curr_pos_plot.set_data([curr_x], [curr_y])
         plt.show(block=False)
         clicks = plt.ginput(n=1)[0]

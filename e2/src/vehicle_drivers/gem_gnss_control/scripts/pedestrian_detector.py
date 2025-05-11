@@ -73,6 +73,9 @@ class PedestrianDetector:
         self.pub_transition = rospy.Publisher("state_manager_node/transition", String, queue_size = 1)
         self.state_sub = rospy.Subscriber("/state_manager_node/state", String, self.set_state)
         self.state = ""
+
+        self.pacmod_enable = False
+        rospy.on_shutdown(self._release_video_writer)
         
         # Initialize ROS node
         rospy.init_node('pedestrian_detector_node', anonymous=True)
@@ -194,6 +197,11 @@ class PedestrianDetector:
 
     def set_state(self, msg):
         self.state = msg.data
+    
+    def _release_video_writer(self):
+        if self.video_writer is not None:
+            self.video_writer.release()
+            print(f"[INFO] Video saved to: {self.video_out_path}")
         
     ###############################################################################
     # Pedestrian GNSS Localization
@@ -446,10 +454,6 @@ class PedestrianDetector:
             # Draw the bounding box on the image (adjust for padding and ratio)
             x1, y1, x2, y2 = box_coords
             # Convert to int and adjust for letterbox padding
-            x1 = int((x1 - pad[0]) / ratio[0])
-            y1 = int((y1 - pad[1]) / ratio[1])
-            x2 = int((x2 - pad[0]) / ratio[0])
-            y2 = int((y2 - pad[1]) / ratio[1])
 
             # Add hand raise detection
             cropped = rgb_img[y1:y2, x1:x2]
@@ -510,7 +514,8 @@ class PedestrianDetector:
                     # Get x position of pedestrian
                     cx = rgb_img.shape[1] / 2
                     x_cam = (u - cx) * mean_depth / self.Focal_Length
-                    z_cam = math.sqrt(mean_depth**2 - x_cam**2)
+                    z_term = max(mean_depth**2 - x_cam**2, 0)
+                    z_cam = math.sqrt(z_term)
                     
                     # Control vehicle speed based on mean distance to pedestrian
                     if mean_depth is not None:
@@ -570,6 +575,10 @@ class PedestrianDetector:
             depth_img = self.bridge.imgmsg_to_cv2(depth_img, "32FC1")
 
             resized_img, ratio, pad = self.letterbox(rgb_img)  # unpack ratio and padding
+
+            self.ratio = ratio
+            self.pad = pad
+            self.latest_depth_img = depth_img
 
             box_coords, conf = self.get_pedestrian_box(self.pedestrian_model, resized_img) # Get bounding box of detected pedestrian
 

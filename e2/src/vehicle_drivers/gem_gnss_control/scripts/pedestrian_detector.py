@@ -409,33 +409,52 @@ class PedestrianDetector:
     
     def get_pedestrian_box(self, model, frame):
         """
-        Gets pose points from a given YOLO model and image frame.
+        Gets bounding box of the *closest* detected person (with valid depth).
         Returns:
-            bounding_box: bounding box of person with highest confidence, None otherwise
-                          in format (top-left-x, top-left-y, bottom-right-x, bottom-right-y)
-            confidence: confidence score that said pedestrian exists
+            box_coords: (x1, y1, x2, y2) in original image coords
+            confidence: confidence of that detection
         """
         with torch.no_grad():
             result = model(frame).pandas().xyxy[0]
 
         if len(result) == 0:
             return None, 0
-        
-        box_coords = None
-        highest_conf = 0
-        for obj in result.itertuples():
-            if obj.name == "person":
-                boxes = (obj.xmin, obj.ymin, obj.xmax, obj.ymax)
-                confidence = obj.confidence
-                if confidence > highest_conf:
-                    if self.time_pedestrian_detected == -1:
-                        self.time_pedestrian_detected = rospy.Time.now()
-                    highest_conf = confidence
-                    box_coords = boxes
-                    highest_conf = confidence
-                break
 
-        return box_coords, highest_conf 
+        closest_box = None
+        closest_conf = 0
+        min_depth = float("inf")
+
+        for obj in result.itertuples():
+            if obj.name != "person" or obj.confidence < self.Conf_Threshold:
+                continue
+
+            x1, y1, x2, y2 = int(obj.xmin), int(obj.ymin), int(obj.xmax), int(obj.ymax)
+
+            # Adjust for letterbox padding and resizing
+            x1 = int((x1 - self.pad[0]) / self.ratio[0])
+            y1 = int((y1 - self.pad[1]) / self.ratio[1])
+            x2 = int((x2 - self.pad[0]) / self.ratio[0])
+            y2 = int((y2 - self.pad[1]) / self.ratio[1])
+
+            if y2 <= y1 or x2 <= x1:
+                continue
+
+            # Get corresponding depth region
+            depth_roi = self.latest_depth_img[y1:y2, x1:x2]
+            valid_depths = depth_roi[np.isfinite(depth_roi) & (depth_roi > 0)]
+
+            if valid_depths.size == 0:
+                continue
+
+            mean_depth = np.mean(valid_depths)
+
+            if mean_depth < min_depth:
+                min_depth = mean_depth
+                closest_box = (x1, y1, x2, y2)
+                closest_conf = obj.confidence
+
+        return closest_box, closest_conf
+
     
     def process_pedestrian_box(self, box_coords, conf, pad, ratio, rgb_img, depth_img):
 

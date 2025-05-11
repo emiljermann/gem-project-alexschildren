@@ -41,6 +41,7 @@ from septentrio_gnss_driver.msg import INSNavGeod
 # GEM PACMod Headers
 from pacmod_msgs.msg import PositionWithSpeed, PacmodCmd, SystemRptFloat, VehicleSpeedRpt
 
+OUT_DIR = "map_videos"
 
 class PurePursuit(object):
     
@@ -86,7 +87,7 @@ class PurePursuit(object):
         self.read_waypoints() 
 
         self.desired_speed = 1.0  # m/s, reference speed
-        self.max_accel     = 0.45 # % of acceleration
+        self.max_accel     = 0.36 # % of acceleration
         self.pid_speed     = PID(0.5, 0.0, 0.1, wg=20)
         self.speed_filter  = OnlineFilter(1.2, 30, 4)
         self.controller = RawJoystickReader()
@@ -160,6 +161,9 @@ class PurePursuit(object):
         self.start_time = time.time()
         self.frame_count = 0
         self.save_vid = False
+
+        if self.save_vid:
+            os.makedirs("frames", exist_ok=True)
     
     def update_plot(self, curr_x, curr_y, curr_h, goal_x, goal_y, goal_h):
 
@@ -271,7 +275,7 @@ class PurePursuit(object):
     def read_waypoints(self):
         # read recorded GPS lat, lon, heading
         dirname  = os.path.dirname(__file__)
-        filename = os.path.join(dirname, '../waypoints/test2waypoints.csv')
+        filename = os.path.join(dirname, '../waypoints/final_waypoints.csv')
         with open(filename) as f:
             path_points = [tuple(line) for line in csv.reader(f)]
         # x towards East and y towards North
@@ -606,6 +610,7 @@ def pure_pursuit():
 
     rospy.init_node('gnss_pp_node', anonymous=True)
     pp = PurePursuit()
+    os.makedirs(OUT_DIR, exist_ok=True)
 
     try:
         pp.start_pp()
@@ -613,7 +618,8 @@ def pure_pursuit():
         pass
     finally:
         if pp.save_vid:
-            with open("frames/timestamps.txt", "w") as f:
+            ts = time.strftime("%m%d_%H%M")
+            with open(os.path.join(OUT_DIR, f"timestamps_{ts}.txt"), "w") as f:
                 for t in pp.time_stamps:
                     f.write(f"{t}\n")
             # Get delays (in 1/100s for GIF)
@@ -622,8 +628,9 @@ def pure_pursuit():
 
             from PIL import Image
             frames = [Image.open(f"frames/frame_{i:04d}.png") for i in range(len(pp.time_stamps))]
-            frames[0].save("map_gif.gif", save_all=True, append_images=frames[1:],
-                duration=delays, loop=0)
+            gif_path = os.path.join(OUT_DIR, f"map_gif_{ts}.gif")
+            frames[0].save(gif_path, save_all=True, append_images=frames[1:],
+                        duration=delays, loop=0)
 
             # Estimate FPS from timestamps
             if len(pp.time_stamps) >= 2:
@@ -631,8 +638,10 @@ def pure_pursuit():
             else:
                 avg_fps = 10  # fallback
 
-            create_mp4_from_frames(folder="frames", output="map_video.mp4", fps=round(avg_fps))
-            delete_frames(folder = "folder")
+            video_path = os.path.join(OUT_DIR, f"map_video_{ts}.mp4")
+            create_mp4_from_frames(folder="frames", output=video_path,
+                       fps=round(avg_fps))
+            delete_frames(folder = "frames")
 
 def create_mp4_from_frames(folder="frames", output="map_video.mp4", fps=10):
     command = [

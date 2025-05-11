@@ -273,6 +273,7 @@ class PurePursuit(object):
         
         distances = (self.path_points_x - clicks[0])**2 + (self.path_points_y - clicks[1])**2
         closest_index = np.argmin(distances)
+        plt.close(fig)
         return closest_index
         
         

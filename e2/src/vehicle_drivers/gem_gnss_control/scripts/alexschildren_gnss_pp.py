@@ -371,9 +371,9 @@ class PurePursuit(object):
         # Dropoff selection
 
         dropoff_options = {
-            1: (1, 18.283, -12.34, -0.01, "the start", ),                        # the start
-            2: (386, 71.517, -4.92, 1.8999, "90 degrees into first circle"),     # 90 degrees into first circle
-            3: (866, -10.496, -12.086, 2.8312, "start of other circle")          # start of the other circle
+            1: (0, 36.465,-12.349,0.0445, "the start", ),                        # the start
+            2: (197, 65.076,-0.152,0.0448, "120 degrees into first circle"),     # 90 degrees into first circle
+            3: (526, 8.385,-9.415,2.1144, "start of other circle")          # start of the other circle
         }
 
         print("Select a dropoff location:")

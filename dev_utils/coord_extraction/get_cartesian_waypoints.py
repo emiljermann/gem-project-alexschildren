@@ -18,9 +18,9 @@ rosbag record -O <bag_file> /septentrio_gnss/navsatfix /septentrio_gnss/insnavge
 output_filename   = "e2/src/vehicle_drivers/gem_gnss_control/waypoints/xyhead_new_track.csv"
 
 # Typical paths: changing these will not do anything unless you want to break the script apart and run it manually
-# created using `rosbag echo /septentrio_gnss/navsatfix -b <bag_file> > <output_file>`
+# created using `rostopic echo /septentrio_gnss/navsatfix -b <bag_file> > <output_file>`
 gnss_input_filename = "dev_utils/coord_extraction/temp_gnss_path.txt" 
-# created using `rosbag echo /septentrio_gnss/insnavgeod -b <bag_file> > <output_file>`
+# created using `rostopic echo /septentrio_gnss/insnavgeod -b <bag_file> > <output_file>`
 ins_input_filename = "dev_utils/coord_extraction/temp_ins_path.txt" 
 
 
@@ -52,12 +52,12 @@ def get_gem_state(lat, lon, heading):
     
 def create_txt_file(rosbag_file, gnss_filename, ins_filename):
     # Create a temporary file to store the GNSS and INS data
-    status = os.system(f"rosbag echo /septentrio_gnss/navsatfix -b {rosbag_file} > {gnss_filename}")
+    status = os.system(f"rostopic echo /septentrio_gnss/navsatfix -b {rosbag_file} > {gnss_filename}")
     if status:
         print("Error creating GNSS file")
         return 1
     
-    status = os.system(f"rosbag echo /septentrio_gnss/insnavgeod -b {rosbag_file} > {ins_filename}")
+    status = os.system(f"rostopic echo /septentrio_gnss/insnavgeod -b {rosbag_file} > {ins_filename}")
     if status:
         print("Error creating INS file")
         return 1

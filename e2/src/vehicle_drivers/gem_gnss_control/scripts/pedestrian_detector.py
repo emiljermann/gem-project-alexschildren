@@ -75,7 +75,7 @@ class PedestrianDetector:
         self.state = ""
 
         self.pacmod_enable = False
-        rospy.on_shutdown(self._release_video_writer)
+        # rospy.on_shutdown(self._release_video_writer)
         
         # Initialize ROS node
         rospy.init_node('pedestrian_detector_node', anonymous=True)
@@ -616,4 +616,8 @@ if __name__ == "__main__":
         rate = rospy.spin() # rospy.Rate(10)  # 10 Hz control loop
     except rospy.ROSInterruptException:
         pass
+    finally:
+        detector._release_video_writer()
+        cv2.destroyAllWindows()
+        rospy.loginfo("Pedestrian Detector Node terminated.")
 

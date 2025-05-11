@@ -161,7 +161,7 @@ class PurePursuit(object):
         self.time_stamps = list()
         self.start_time = time.time()
         self.frame_count = 0
-        self.save_vid = False
+        self.save_vid = True
 
         if self.save_vid:
             os.makedirs("frames", exist_ok=True)
@@ -411,7 +411,7 @@ class PurePursuit(object):
     def handle_dropoff(self):
         self._apply_brakes()
         # would be cool if it could conclude pedestrian has left the vehicle autonomously but we'll just wait 20 seconds for now
-        for _ in range(20):
+        for _ in range(10):
             if rospy.is_shutdown():
                 return
             rospy.sleep(1)

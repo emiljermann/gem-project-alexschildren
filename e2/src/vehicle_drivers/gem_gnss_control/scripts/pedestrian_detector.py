@@ -73,11 +73,9 @@ class PedestrianDetector:
         self.pub_transition = rospy.Publisher("state_manager_node/transition", String, queue_size = 1)
         self.state_sub = rospy.Subscriber("/state_manager_node/state", String, self.set_state)
         self.state = ""
-        
-        # Frame buffer for batch processing to increase efficiency
-        self.frame_buffer = []
-        self.buffer_size = 4  # Process 4 frames at once for better throughput
-        self.batch = False # Flag to choose batch or not @TODO: Implement batch, do we want that?
+
+        self.pacmod_enable = False
+        rospy.on_shutdown(self._release_video_writer)
         
         # Initialize ROS node
         rospy.init_node('pedestrian_detector_node', anonymous=True)
@@ -104,6 +102,15 @@ class PedestrianDetector:
         )
         self.last_pose_time = 0  # Throttle timer for pose estimation
         self.pose_throttle_interval = 0.0  # Minimum time (s) between pose checks
+        self.hand_y_max = 0.4    # stop at mid-torso
+        self.hand_vis_threshold = 0.5
+
+        os.makedirs("pedestrian_videos", exist_ok=True)
+        timestamp = datetime.datetime.now().strftime("%m%d_%H%M")
+        self.video_out_path = f"pedestrian_videos/pedestrian_vid_{timestamp}.mp4"
+        self.video_fps = 10
+        self.video_size = (640, 384)  # default, will auto-resize on first frame
+        self.video_writer = None
 
         # Commented out stop sign detection model code
         self.pedestrian_model = torch.hub.load('ultralytics/yolov5', 'yolov5s', pretrained=True, trust_repo=True)
@@ -188,6 +195,11 @@ class PedestrianDetector:
 
     def set_state(self, msg):
         self.state = msg.data
+    
+    def _release_video_writer(self):
+        if self.video_writer is not None:
+            self.video_writer.release()
+            print(f"[INFO] Video saved to: {self.video_out_path}")
         
     ###############################################################################
     # Pedestrian GNSS Localization
@@ -238,32 +250,43 @@ class PedestrianDetector:
             return False
 
         rgb = cv2.cvtColor(cropped_img, cv2.COLOR_BGR2RGB)
-        cropped_height, cropped_width, channels = cropped_img.shape
         results = self.pose.process(rgb)
         if not results.pose_landmarks:
             return False
 
         landmarks = results.pose_landmarks.landmark
+        h, w, _ = cropped_img.shape
 
-        # Left and right wrist and shoulder indices
-        left_wrist = landmarks[15]
-        left_shoulder = landmarks[11]
-        left_hip = landmarks[23]
-        right_wrist = landmarks[16]
-        right_shoulder = landmarks[12]
-        right_hip = landmarks[24]
-        nose = landmarks[0]
+        # Draw landmarks
+        for lm in landmarks:
+            if lm.visibility < self.hand_vis_threshold:
+                continue
+            cx, cy = int(lm.x * w), int(lm.y * h)
+            cv2.circle(cropped_img, (cx, cy), 3, (0, 255, 255), -1)
 
-        # Visibility threshold check
-        left_valid = left_wrist.visibility > 0.5 and left_shoulder.visibility > 0.5
-        right_valid = right_wrist.visibility > 0.5 and right_shoulder.visibility > 0.5
+        # Get key landmarks
+        nose        = landmarks[0]
+        left_wrist  = landmarks[15]; right_wrist  = landmarks[16]
+        left_hip    = landmarks[23]; right_hip    = landmarks[24]
+        left_shldr  = landmarks[11]; right_shldr  = landmarks[12]
 
-        # I want to make it so that wrist is only detected within a certain y range (upper half hip to nose)
-        # and that it's only detected past a certain x threshold (currently the outer quarters of the image)
-        left_hand_raised = left_valid and left_wrist.y > nose.y and left_wrist.y < left_hip.y and (left_wrist.x < cropped_width / 3.0 or left_wrist.x > 2 * (cropped_width / 3.0)) 
-        right_hand_raised = right_valid and right_wrist.y > nose.y and right_wrist.y < right_hip.y and (right_wrist.x < cropped_width / 3.0 or right_wrist.x > 2 * (cropped_width / 3.0))
+        # Check visibility
+        left_valid  = left_wrist.visibility > self.hand_vis_threshold # and left_shldr.visibility > self.hand_vis_threshold
+        right_valid = right_wrist.visibility > self.hand_vis_threshold # and right_shldr.visibility > self.hand_vis_threshold
+        
+        cv2.rectangle(cropped_img, (0, 0), (int(0.5 * w), int(self.hand_y_max * h)), (255, 0, 0), 2)
+        cv2.rectangle(cropped_img, (int(0.5 * w), 0), (w, int(self.hand_y_max * h)), (255, 0, 0), 2)
 
-        return left_hand_raised or right_hand_raised
+        # Actual landmark Y/X checks (normalized)
+
+        left_up  = left_valid  and left_wrist.y < self.hand_y_max
+        right_up = right_valid and right_wrist.y < self.hand_y_max
+
+        if left_up or right_up:
+            cv2.putText(cropped_img, "✔ Hand raised", (10, 25), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 255, 0), 2)
+
+        return left_up or right_up
+
     
     def enable_callback(self, msg):
         self.pacmod_enable = msg.data
@@ -405,7 +428,6 @@ class PedestrianDetector:
                     highest_conf = confidence
                     box_coords = boxes
                     highest_conf = confidence
-                break
 
         return box_coords, highest_conf 
     
@@ -425,10 +447,25 @@ class PedestrianDetector:
 
             # Add hand raise detection
             cropped = rgb_img[y1:y2, x1:x2]
+            if cropped.shape[0] == 0 or cropped.shape[1] == 0:
+                rospy.loginfo("Invalid cropped region — skipping")
+                return rgb_img, None, None, None
+
+            # Pose + drawing is now embedded in is_hand_raised()
             hand_raised = self.is_hand_raised(cropped)
+
+            # Overlay the cropped + annotated image as thumbnail
+            thumb_h = int(rgb_img.shape[0] * 0.4)
+            thumb_w = int(cropped.shape[1] * thumb_h / cropped.shape[0])
+            thumb = cv2.resize(cropped, (thumb_w, thumb_h))
+            x_off = rgb_img.shape[1] - thumb_w - 10
+            y_off = 10
+            rgb_img[y_off:y_off + thumb_h, x_off:x_off + thumb_w] = thumb
+
             if not hand_raised:
                 rospy.loginfo("Detected person is not raising hand — skipping pickup")
                 return rgb_img, None, None, None
+
 
             # Publish box coordinate data
             box_coords_msg = Float32MultiArray()
@@ -467,7 +504,8 @@ class PedestrianDetector:
                     # Get x position of pedestrian
                     cx = rgb_img.shape[1] / 2
                     x_cam = (u - cx) * mean_depth / self.Focal_Length
-                    z_cam = math.sqrt(mean_depth**2 - x_cam**2)
+                    z_term = max(mean_depth**2 - x_cam**2, 0)
+                    z_cam = math.sqrt(z_term)
                     
                     # Control vehicle speed based on mean distance to pedestrian
                     if mean_depth is not None:
@@ -528,6 +566,10 @@ class PedestrianDetector:
 
             resized_img, ratio, pad = self.letterbox(rgb_img)  # unpack ratio and padding
 
+            self.ratio = ratio
+            self.pad = pad
+            self.latest_depth_img = depth_img
+
             box_coords, conf = self.get_pedestrian_box(self.pedestrian_model, resized_img) # Get bounding box of detected pedestrian
 
             rgb_img, avg_depth, med_depth, std_depth = self.process_pedestrian_box(box_coords, conf, pad, ratio, rgb_img, depth_img)
@@ -535,6 +577,22 @@ class PedestrianDetector:
             # Publish RGB image
             ros_rgb_img = self.bridge.cv2_to_imgmsg(rgb_img, "bgr8")
             self.pub_rgb_pedestrian_image.publish(ros_rgb_img)
+
+            # Initialize writer on first frame
+            if self.video_writer is None:
+                h, w = rgb_img.shape[:2]
+                self.video_size = (w, h)
+                self.video_writer = cv2.VideoWriter(
+                    self.video_out_path,
+                    cv2.VideoWriter_fourcc(*'mp4v'),
+                    self.video_fps,
+                    self.video_size
+                )
+
+            # Write frame to video
+            self.video_writer.write(rgb_img)
+            cv2.imshow("Pedestrian Image", rgb_img)
+            cv2.waitKey(1)
 
             # Publish Depth Data: (publishes [none, none, none] if no pedestrian is detected)
             depth_data = Float32MultiArray()

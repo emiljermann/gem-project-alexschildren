@@ -41,6 +41,7 @@ from septentrio_gnss_driver.msg import INSNavGeod
 # GEM PACMod Headers
 from pacmod_msgs.msg import PositionWithSpeed, PacmodCmd, SystemRptFloat, VehicleSpeedRpt
 
+OUT_DIR = "map_videos"
 
 class PurePursuit(object):
     
@@ -606,6 +607,7 @@ def pure_pursuit():
 
     rospy.init_node('gnss_pp_node', anonymous=True)
     pp = PurePursuit()
+    os.makedirs(OUT_DIR, exist_ok=True)
 
     try:
         pp.start_pp()
@@ -613,7 +615,8 @@ def pure_pursuit():
         pass
     finally:
         if pp.save_vid:
-            with open("frames/timestamps.txt", "w") as f:
+            ts = time.strftime("%m%d_%H%M")
+            with open(os.path.join(OUT_DIR, "timestamps.txt"), "w") as f:
                 for t in pp.time_stamps:
                     f.write(f"{t}\n")
             # Get delays (in 1/100s for GIF)
@@ -622,8 +625,9 @@ def pure_pursuit():
 
             from PIL import Image
             frames = [Image.open(f"frames/frame_{i:04d}.png") for i in range(len(pp.time_stamps))]
-            frames[0].save("map_gif.gif", save_all=True, append_images=frames[1:],
-                duration=delays, loop=0)
+            gif_path = os.path.join(OUT_DIR, f"map_gif_{ts}.gif")
+            frames[0].save(gif_path, save_all=True, append_images=frames[1:],
+                        duration=delays, loop=0)
 
             # Estimate FPS from timestamps
             if len(pp.time_stamps) >= 2:
@@ -631,8 +635,10 @@ def pure_pursuit():
             else:
                 avg_fps = 10  # fallback
 
-            create_mp4_from_frames(folder="frames", output="map_video.mp4", fps=round(avg_fps))
-            delete_frames(folder = "folder")
+            video_path = os.path.join(OUT_DIR, f"map_video_{ts}.mp4")
+            create_mp4_from_frames(folder="frames", output=video_path,
+                       fps=round(avg_fps))
+            delete_frames(folder = "frames")
 
 def create_mp4_from_frames(folder="frames", output="map_video.mp4", fps=10):
     command = [

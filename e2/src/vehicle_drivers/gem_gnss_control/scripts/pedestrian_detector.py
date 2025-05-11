@@ -104,6 +104,13 @@ class PedestrianDetector:
         self.hand_x_margin = 0.33  # outer 33% of width
         self.hand_vis_threshold = 0.5
 
+        os.makedirs("pedestrian_videos", exist_ok=True)
+        timestamp = datetime.datetime.now().strftime("%m%d_%H%M")
+        self.video_out_path = f"pedestrian_videos/pedestrian_vid_{timestamp}.mp4"
+        self.video_fps = 10
+        self.video_size = (640, 384)  # default, will auto-resize on first frame
+        self.video_writer = None
+
         # Commented out stop sign detection model code
         self.pedestrian_model = torch.hub.load('ultralytics/yolov5', 'yolov5s', pretrained=True, trust_repo=True)
         self.pedestrian_model.to(self.device).eval()
@@ -571,6 +578,20 @@ class PedestrianDetector:
             # Publish RGB image
             ros_rgb_img = self.bridge.cv2_to_imgmsg(rgb_img, "bgr8")
             self.pub_rgb_pedestrian_image.publish(ros_rgb_img)
+
+            # Initialize writer on first frame
+            if self.video_writer is None:
+                h, w = rgb_img.shape[:2]
+                self.video_size = (w, h)
+                self.video_writer = cv2.VideoWriter(
+                    self.video_out_path,
+                    cv2.VideoWriter_fourcc(*'mp4v'),
+                    self.video_fps,
+                    self.video_size
+                )
+
+            # Write frame to video
+            self.video_writer.write(rgb_img)
 
             # Publish Depth Data: (publishes [none, none, none] if no pedestrian is detected)
             depth_data = Float32MultiArray()

@@ -74,11 +74,6 @@ class PedestrianDetector:
         self.state_sub = rospy.Subscriber("/state_manager_node/state", String, self.set_state)
         self.state = ""
         
-        # Frame buffer for batch processing to increase efficiency
-        self.frame_buffer = []
-        self.buffer_size = 4  # Process 4 frames at once for better throughput
-        self.batch = False # Flag to choose batch or not @TODO: Implement batch, do we want that?
-        
         # Initialize ROS node
         rospy.init_node('pedestrian_detector_node', anonymous=True)
         
@@ -104,6 +99,10 @@ class PedestrianDetector:
         )
         self.last_pose_time = 0  # Throttle timer for pose estimation
         self.pose_throttle_interval = 0.0  # Minimum time (s) between pose checks
+        self.hand_y_min = 0.1    # start a little below nose
+        self.hand_y_max = 0.6    # stop at mid-torso
+        self.hand_x_margin = 0.33  # outer 33% of width
+        self.hand_vis_threshold = 0.5
 
         # Commented out stop sign detection model code
         self.pedestrian_model = torch.hub.load('ultralytics/yolov5', 'yolov5s', pretrained=True, trust_repo=True)
@@ -238,32 +237,54 @@ class PedestrianDetector:
             return False
 
         rgb = cv2.cvtColor(cropped_img, cv2.COLOR_BGR2RGB)
-        cropped_height, cropped_width, channels = cropped_img.shape
         results = self.pose.process(rgb)
         if not results.pose_landmarks:
             return False
 
         landmarks = results.pose_landmarks.landmark
+        h, w, _ = cropped_img.shape
 
-        # Left and right wrist and shoulder indices
-        left_wrist = landmarks[15]
-        left_shoulder = landmarks[11]
-        left_hip = landmarks[23]
-        right_wrist = landmarks[16]
-        right_shoulder = landmarks[12]
-        right_hip = landmarks[24]
-        nose = landmarks[0]
+        # Draw landmarks
+        for lm in landmarks:
+            if lm.visibility < self.hand_vis_threshold:
+                continue
+            cx, cy = int(lm.x * w), int(lm.y * h)
+            cv2.circle(cropped_img, (cx, cy), 3, (0, 255, 255), -1)
 
-        # Visibility threshold check
-        left_valid = left_wrist.visibility > 0.5 and left_shoulder.visibility > 0.5
-        right_valid = right_wrist.visibility > 0.5 and right_shoulder.visibility > 0.5
+        # Get key landmarks
+        nose        = landmarks[0]
+        left_wrist  = landmarks[15]; right_wrist  = landmarks[16]
+        left_hip    = landmarks[23]; right_hip    = landmarks[24]
+        left_shldr  = landmarks[11]; right_shldr  = landmarks[12]
 
-        # I want to make it so that wrist is only detected within a certain y range (upper half hip to nose)
-        # and that it's only detected past a certain x threshold (currently the outer quarters of the image)
-        left_hand_raised = left_valid and left_wrist.y > nose.y and left_wrist.y < left_hip.y and (left_wrist.x < cropped_width / 3.0 or left_wrist.x > 2 * (cropped_width / 3.0)) 
-        right_hand_raised = right_valid and right_wrist.y > nose.y and right_wrist.y < right_hip.y and (right_wrist.x < cropped_width / 3.0 or right_wrist.x > 2 * (cropped_width / 3.0))
+        # Check visibility
+        left_valid  = left_wrist.visibility > self.hand_vis_threshold # and left_shldr.visibility > self.hand_vis_threshold
+        right_valid = right_wrist.visibility > self.hand_vis_threshold # and right_shldr.visibility > self.hand_vis_threshold
 
-        return left_hand_raised or right_hand_raised
+        # Define vertical range (from nose downward)
+        y_top = int((nose.y + self.hand_y_min * (max(left_hip.y, right_hip.y) - nose.y)) * h)
+        y_bot = int((nose.y + self.hand_y_max * (max(left_hip.y, right_hip.y) - nose.y)) * h)
+
+        # Define horizontal hand zones
+        margin = int(w * self.hand_x_margin)
+        cv2.rectangle(cropped_img, (0, y_top), (margin, y_bot), (255, 0, 0), 2)
+        cv2.rectangle(cropped_img, (w - margin, y_top), (w, y_bot), (255, 0, 0), 2)
+
+        # Actual landmark Y/X checks (normalized)
+        band_top = nose.y + self.hand_y_min * (max(left_hip.y, right_hip.y) - nose.y)
+        band_bot = nose.y + self.hand_y_max * (max(left_hip.y, right_hip.y) - nose.y)
+
+        left_in_x  = left_wrist.x  < self.hand_x_margin
+        right_in_x = right_wrist.x > 1.0 - self.hand_x_margin
+
+        left_up  = left_valid  and band_top < left_wrist.y  < band_bot and left_in_x
+        right_up = right_valid and band_top < right_wrist.y < band_bot and right_in_x
+
+        if left_up or right_up:
+            cv2.putText(cropped_img, "✔ Hand raised", (10, 25), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 255, 0), 2)
+
+        return left_up or right_up
+
     
     def enable_callback(self, msg):
         self.pacmod_enable = msg.data
@@ -425,10 +446,25 @@ class PedestrianDetector:
 
             # Add hand raise detection
             cropped = rgb_img[y1:y2, x1:x2]
+            if cropped.shape[0] == 0 or cropped.shape[1] == 0:
+                rospy.loginfo("Invalid cropped region — skipping")
+                return rgb_img, None, None, None
+
+            # Pose + drawing is now embedded in is_hand_raised()
             hand_raised = self.is_hand_raised(cropped)
+
+            # Overlay the cropped + annotated image as thumbnail
+            thumb_h = int(rgb_img.shape[0] * 0.4)
+            thumb_w = int(cropped.shape[1] * thumb_h / cropped.shape[0])
+            thumb = cv2.resize(cropped, (thumb_w, thumb_h))
+            x_off = rgb_img.shape[1] - thumb_w - 10
+            y_off = 10
+            rgb_img[y_off:y_off + thumb_h, x_off:x_off + thumb_w] = thumb
+
             if not hand_raised:
                 rospy.loginfo("Detected person is not raising hand — skipping pickup")
                 return rgb_img, None, None, None
+
 
             # Publish box coordinate data
             box_coords_msg = Float32MultiArray()

@@ -243,8 +243,8 @@ class PurePursuit(object):
         closest_wp_index = int(np.argmin(self.dist_arr))
         cx = self.path_points_x[closest_wp_index]
         cy = self.path_points_y[closest_wp_index]
-        ch = self.path_points_heading[closest_wp_index]
-        self.heading_error = np.abs(curr_h - ch)
+        ch = self.path_points_heading[self.goal]
+        self.heading_error = (np.abs(curr_h - ch)+2*np.pi)% (2*np.pi)
         self.distance_error = self.dist((curr_x, curr_y), (cx, cy))
             
         

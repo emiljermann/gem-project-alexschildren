@@ -148,7 +148,7 @@ class PurePursuit(object):
         plt.ion()
         plt.tight_layout()
         self.fig = plt.figure(figsize=(12, 8))
-        gs = gridspec.GridSpec(1, 4, width_ratios=[3, 0.4, 0.4, 0.4])
+        gs = gridspec.GridSpec(1, 4, width_ratios=[3, 0.4, 0.4])
         
         
         # plot code for main window
@@ -167,28 +167,28 @@ class PurePursuit(object):
         self.ax.legend()
         
         # plot code for heading error side bar
-        self.ax_heading = plt.subplot(gs[1])
-        self.heading_bar = self.ax_heading.bar([0], [0], color='salmon', width=0.4)
-        self.ax_heading.set_title("Heading Error")
-        self.ax_heading.set_ylabel("rad")
-        self.ax_heading.set_ylim(0, np.pi)
-        self.ax_heading.set_xticks([])
-        self.heading_error = None
-        self.mean_heading_error = 0.0
+        # self.ax_heading = plt.subplot(gs[1])
+        # self.heading_bar = self.ax_heading.bar([0], [0], color='salmon', width=0.4)
+        # self.ax_heading.set_title("Heading Error")
+        # self.ax_heading.set_ylabel("rad")
+        # self.ax_heading.set_ylim(0, np.pi)
+        # self.ax_heading.set_xticks([])
+        # self.heading_error = None
+        # self.mean_heading_error = 0.0
         
         # plot code for distance error side bar
-        self.ax_dist = plt.subplot(gs[2])
+        self.ax_dist = plt.subplot(gs[1])
         self.distance_bar = self.ax_dist.bar([0], [0], color='lightgreen', width=0.4)
-        self.ax_dist.set_title("Distance Error")
+        self.ax_dist.set_title("GNSSError")
         self.ax_dist.set_ylabel("m")
-        self.ax_dist.set_ylim(0, 20)
+        self.ax_dist.set_ylim(0, 10)
         self.ax_dist.set_xticks([])
         self.mean_distance_error = 0.0
         self.distance_error = None
         
         # plot code for speed side bar
         # Side bar: Speed
-        self.ax_speed = plt.subplot(gs[3])
+        self.ax_speed = plt.subplot(gs[2])
         self.speed_bar = self.ax_speed.bar([0], [0], color='skyblue', width=0.4)
         self.ax_speed.set_title("Speed")
         self.ax_speed.set_ylabel("m/s")
@@ -248,9 +248,9 @@ class PurePursuit(object):
         self.distance_error = self.dist((curr_x, curr_y), (cx, cy))
             
         
-        if self.heading_error is not None:
-            self.mean_heading_error = (self.mean_heading_error * self.frame_count + self.heading_error)/ (self.frame_count + 1)
-            self.heading_bar[0].set_height(self.heading_error)
+        # if self.heading_error is not None:
+        #     self.mean_heading_error = (self.mean_heading_error * self.frame_count + self.heading_error)/ (self.frame_count + 1)
+        #     self.heading_bar[0].set_height(self.heading_error)
         
         if self.distance_error is not None:
             self.mean_distance_error = (self.mean_distance_error * self.frame_count + self.distance_error)/ (self.frame_count + 1)

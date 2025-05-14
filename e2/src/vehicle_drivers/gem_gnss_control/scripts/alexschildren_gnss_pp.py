@@ -200,7 +200,7 @@ class PurePursuit(object):
         
         self.time_stamps = list()
         self.start_time = time.time()
-        self.frame_count = 1
+        self.frame_count = 0
         self.save_vid = True
         
         
@@ -269,8 +269,8 @@ class PurePursuit(object):
         if self.frame_count % 10 == 0:
             print(f"Frame: {self.frame_count}")
             # print(f"Average Heading Error: {self.mean_heading_error}")
-            print(f"Average Distance Error: {self.mean_distance_error/self.frame_count}")
-            print(f"Average Speed: {self.mean_speed/self.frame_count}")
+            print(f"Average Distance Error: {self.mean_distance_error/(self.frame_count+1)}")
+            print(f"Average Speed: {self.mean_speed/(self.frame_count+1)}")
 
         self.fig.canvas.flush_events()
         self.frame_count += 1

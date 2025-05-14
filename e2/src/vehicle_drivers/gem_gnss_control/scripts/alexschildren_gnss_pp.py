@@ -253,11 +253,11 @@ class PurePursuit(object):
         #     self.heading_bar[0].set_height(self.heading_error)
         
         if self.distance_error is not None:
-            self.mean_distance_error = (self.mean_distance_error * self.frame_count + self.distance_error)/ (self.frame_count + 1)
+            self.mean_distance_error += self.distance_error
             self.distance_bar[0].set_height(self.distance_error)
         
         if self.speed is not None:
-            self.mean_speed = (self.mean_speed * self.frame_count + self.speed)/ (self.frame_count + 1)
+            self.mean_speed += self.speed
             self.speed_bar[0].set_height(self.speed)
             
             
@@ -268,9 +268,9 @@ class PurePursuit(object):
             self.time_stamps.append(t)
         if self.frame_count % 10 == 0:
             print(f"Frame: {self.frame_count}")
-            print(f"Average Heading Error: {self.mean_heading_error}")
-            print(f"Average Distance Error: {self.mean_distance_error}")
-            print(f"Average Speed: {self.mean_speed}")
+            # print(f"Average Heading Error: {self.mean_heading_error}")
+            print(f"Average Distance Error: {self.mean_distance_error/self.frame_count}")
+            print(f"Average Speed: {self.mean_speed/self.frame_count}")
 
         self.fig.canvas.flush_events()
         self.frame_count += 1

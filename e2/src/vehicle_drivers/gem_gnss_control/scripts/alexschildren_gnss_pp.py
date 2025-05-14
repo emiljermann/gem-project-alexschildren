@@ -173,8 +173,8 @@ class PurePursuit(object):
         # self.ax_heading.set_ylabel("rad")
         # self.ax_heading.set_ylim(0, np.pi)
         # self.ax_heading.set_xticks([])
-        # self.heading_error = None
-        # self.mean_heading_error = 0.0
+        self.heading_error = None
+        self.mean_heading_error = 0.0
         
         # plot code for distance error side bar
         self.ax_dist = plt.subplot(gs[1])

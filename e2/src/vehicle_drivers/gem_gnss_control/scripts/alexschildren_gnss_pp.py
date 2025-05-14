@@ -152,7 +152,7 @@ class PurePursuit(object):
         
         
         # plot code for main window
-        self.ax = plt.subplots(gs[0])
+        self.ax = plt.subplot(gs[0])
         self.path_plot, = self.ax.plot([], [], 'k--', label='Path')
         self.curr_pos_plot, = self.ax.plot([], [], 'bo', label='Current Position')
         self.goal_plot, = self.ax.plot([], [], 'ro', label='Goal Wayoint')

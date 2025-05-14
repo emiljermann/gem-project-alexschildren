@@ -200,7 +200,7 @@ class PurePursuit(object):
         
         self.time_stamps = list()
         self.start_time = time.time()
-        self.frame_count = 0
+        self.frame_count = 1
         self.save_vid = True
         
         

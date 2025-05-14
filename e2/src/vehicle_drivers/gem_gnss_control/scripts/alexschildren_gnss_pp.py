@@ -585,7 +585,8 @@ class PurePursuit(object):
                     # transition to let ped out state if close enough to desired waypoint
                     self.pub_transition.publish(String(data="DROPOFF_END"))
             elif self.state == "DROPOFF_END" and self.gem_enable:
-                rospy.loginfo("Reached stop waypoint %d  (%.2f m away) - braking", self.stop_wp_index, dist_to_stop)
+                if self.stop_wp_index is not None:
+                    rospy.loginfo("Reached stop waypoint %d  (%.2f m away) - braking", self.stop_wp_index, dist_to_stop)
                 self.handle_dropoff() # brakes, waits 20 seconds, unbrakes
                 self.resume_motion()
                 # self.state = "SEARCHING" #Similar deal here to DROPPING_OFF, anytime we wait need to run only once

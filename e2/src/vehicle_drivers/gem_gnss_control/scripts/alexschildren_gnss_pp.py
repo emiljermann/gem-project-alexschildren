@@ -22,6 +22,7 @@ import numpy as np
 from numpy import linalg as la
 import scipy.signal as signal
 import matplotlib.pyplot as plt
+import matplotlib.gridspec as gridspec
 import time
 import subprocess
 
@@ -145,7 +146,13 @@ class PurePursuit(object):
 
         # OUR LOCATION V.S. GOAL POINT ON PURE PURSUIT POINT MAP
         plt.ion()
-        self.fig, self.ax = plt.subplots()
+        plt.tight_layout()
+        self.fig = plt.figure(figsize=(12, 8))
+        gs = gridspec.GridSpec(1, 4, width_ratios=[3, 0.4, 0.4, 0.4])
+        
+        
+        # plot code for main window
+        self.ax = plt.subplots(gs[0])
         self.path_plot, = self.ax.plot([], [], 'k--', label='Path')
         self.curr_pos_plot, = self.ax.plot([], [], 'bo', label='Current Position')
         self.goal_plot, = self.ax.plot([], [], 'ro', label='Goal Wayoint')
@@ -158,10 +165,45 @@ class PurePursuit(object):
         self.ax.set_ylabel("Y (m)")
         self.ax.set_title("Pure Pursuit Live Map")
         self.ax.legend()
+        
+        # plot code for heading error side bar
+        self.ax_heading = plt.subplot(gs[1])
+        self.heading_bar = self.ax_heading.bar([0], [0], color='salmon', width=0.4)
+        self.ax_heading.set_title("Heading Error")
+        self.ax_heading.set_ylabel("rad")
+        self.ax_heading.set_ylim(0, np.pi)
+        self.ax_heading.set_xticks([])
+        self.heading_error = None
+        self.mean_heading_error = 0.0
+        
+        # plot code for distance error side bar
+        self.ax_dist = plt.subplot(gs[2])
+        self.distance_bar = self.ax_dist.bar([0], [0], color='lightgreen', width=0.4)
+        self.ax_dist.set_title("Distance Error")
+        self.ax_dist.set_ylabel("m")
+        self.ax_dist.set_ylim(0, 20)
+        self.ax_dist.set_xticks([])
+        self.mean_distance_error = 0.0
+        self.distance_error = None
+        
+        # plot code for speed side bar
+        # Side bar: Speed
+        self.ax_speed = plt.subplot(gs[3])
+        self.speed_bar = self.ax_speed.bar([0], [0], color='skyblue', width=0.4)
+        self.ax_speed.set_title("Speed")
+        self.ax_speed.set_ylabel("m/s")
+        self.ax_speed.set_ylim(0, 15)
+        self.ax_speed.set_xticks([])
+        self.mean_speed = 0.0
+        self.speed = None
+        
+        
         self.time_stamps = list()
         self.start_time = time.time()
         self.frame_count = 0
         self.save_vid = True
+        
+        
 
         if self.save_vid:
             os.makedirs("frames", exist_ok=True)
@@ -197,11 +239,38 @@ class PurePursuit(object):
         self.ax.set_ylim(curr_y - 10, curr_y + 10)
         self.fig.canvas.draw()
 
+        #get errors
+        closest_wp_index = int(np.argmin(self.dist_arr))
+        cx = self.path_points_x[closest_wp_index]
+        cy = self.path_points_y[closest_wp_index]
+        ch = self.path_points_heading[closest_wp_index]
+        self.heading_error = np.abs(curr_h - ch)
+        self.distance_error = self.dist((curr_x, curr_y), (cx, cy))
+            
+        
+        if self.heading_error is not None:
+            self.mean_heading_error = (self.mean_heading_error * self.frame_count + self.heading_error)/ (self.frame_count + 1)
+            self.heading_bar[0].set_height(self.heading_error)
+        
+        if self.distance_error is not None:
+            self.mean_distance_error = (self.mean_distance_error * self.frame_count + self.distance_error)/ (self.frame_count + 1)
+            self.distance_bar[0].set_height(self.distance_error)
+        
+        if self.speed is not None:
+            self.mean_speed = (self.mean_speed * self.frame_count + self.speed)/ (self.frame_count + 1)
+            self.speed_bar[0].set_height(self.speed)
+            
+            
         if self.save_vid:
             t = time.time() - self.start_time
             fname = f"frames/frame_{self.frame_count:04d}.png"
             self.fig.savefig(fname)
             self.time_stamps.append(t)
+        if self.frame_count % 10 == 0:
+            print(f"Frame: {self.frame_count}")
+            print(f"Average Heading Error: {self.mean_heading_error}")
+            print(f"Average Distance Error: {self.mean_distance_error}")
+            print(f"Average Speed: {self.mean_speed}")
 
         self.fig.canvas.flush_events()
         self.frame_count += 1
@@ -401,6 +470,8 @@ class PurePursuit(object):
         self.stop_wp_index = self.get_destination_input() # returns waypoint idx of where we want to go
 
         self.closest_wp_index = int(np.argmin(self.dist_arr))
+        
+        
         estimated_time_to_stop_point = self.estimate_drive_time_to_stop_point_arc()
         # estimated_time_to_stop_point = self.estimate_drive_time_to_stop_point_birds_eye()
         rospy.loginfo(f"Estimated time to dropoff pedestrian: {estimated_time_to_stop_point}")
@@ -447,9 +518,31 @@ class PurePursuit(object):
         #@TODO: may need to be tuned to work with orientation
         # self.polyfit_yaw = self.heading_to_yaw(np.degrees(self.polyfit_yaw))
         # alpha = self.polyfit_yaw - curr_yaw
-        dx = self.path_points_x[self.goal] - curr_x
-        dy = self.path_points_y[self.goal] - curr_y
-        alpha = math.atan2(dy, dx) - curr_yaw
+        
+        
+        # PURE PURSUIT CONTROL FUN TUNING
+        
+        
+        # method 1 heading deviation correction (add break back in tuning correction)
+        alpha = self.path_points_heading[self.goal] - curr_yaw
+        # ------------------------------------------------------
+        
+        
+        # method 2 position deviation correction ---------------
+        # dx = self.path_points_x[self.goal] - curr_x
+        # dy = self.path_points_y[self.goal] - curr_y
+        # alpha = math.atan2(dy, dx) - curr_yaw
+        # ------------------------------------------------------
+        
+        # method 3 weighted average of method 1 and 2 ----------
+        # w = 0.7
+        # alpha = (1-w) * (self.path_points_heading[self.goal] - curr_yaw) + w * (math.atan2(dy, dx) - curr_yaw)
+        # ------------------------------------------------------
+        
+        # method 4 polyfit yaw alignment -----------------------
+        # alpha = self.polyfit_yaw - curr_yaw
+        # ------------------------------------------------------
+        
         
         # ----------------- tuning this part as needed -----------------
         k = 1.0

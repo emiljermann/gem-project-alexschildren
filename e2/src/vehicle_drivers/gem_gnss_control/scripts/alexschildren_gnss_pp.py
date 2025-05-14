@@ -148,7 +148,7 @@ class PurePursuit(object):
         plt.ion()
         plt.tight_layout()
         self.fig = plt.figure(figsize=(12, 8))
-        gs = gridspec.GridSpec(1, 4, width_ratios=[3, 0.4, 0.4])
+        gs = gridspec.GridSpec(1, 3, width_ratios=[3, 0.4, 0.4])
         
         
         # plot code for main window
